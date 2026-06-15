@@ -3,7 +3,6 @@ import { createSignal, createMemo, onCleanup } from "solid-js"
 import * as persistence from "./persistence.js"
 import {
   tick as tickState,
-  celebrate as celebrateState,
   scared as scaredState,
   deriveState,
   feed,
@@ -11,6 +10,19 @@ import {
   rest,
   rename,
   switchSpecies,
+  onPromptStart,
+  onToolSuccess,
+  onToolFailure,
+  onTurnDone,
+  onTodoCompleted,
+  onFileEdited,
+  onPermissionAllowed,
+  onShellSuccess,
+  onBranchUpdated,
+  onCompacted,
+  onIdleRecovery,
+  onStreak,
+  toolXp,
 } from "./state.js"
 import { renderFrame, frameCount, frameIntervalMs, SPECIES } from "./species.js"
 
@@ -172,7 +184,7 @@ const tui = async (api) => {
     if (!s) return
     const next = play(s)
     await persistence.save(next)
-    api.ui.toast({ variant: "success", title: "Woohoo!", message: `${next.name} played (+5xp).` })
+    api.ui.toast({ variant: "success", title: "Woohoo!", message: `${next.name} played (+1xp).` })
   }
   const restBuddy = async () => {
     const s = await persistence.load()
@@ -299,16 +311,218 @@ const tui = async (api) => {
     bindings: [],
   })
 
-  api.event.on("session.idle", async () => {
-    const s = await persistence.load()
-    if (!s) return
-    await persistence.save(celebrateState(s))
+  // ---------- Work-driven progression ----------
+  //
+  // Buddy's xp now comes from real coding activity, not just /buddy-play.
+  // We listen to opencode session events, accumulate per-turn xp in
+  // memory (to avoid hammering the disk), and settle once at turn end.
+
+  const TURN_XP_CAP = 30 // hard cap so a single noisy turn can't level-flood
+  const FILE_EDIT_THROTTLE_MS = 30_000
+  const SCARED_FAILURE_THRESHOLD = 2
+  const STREAK_THRESHOLD = 3 // award streak bonus on Nth consecutive success
+  const SAME_TOOL_HALVE_AFTER = 5 // 6th+ call of the same tool in a turn → xp halved
+  const IDLE_RECOVERY_MS = 5 * 60_000 // 5 min of no prompt → recovery eligible
+  const IDLE_RECOVERY_CHECK_MS = 60_000 // poll every minute
+
+  let lastFileEditedAt = 0
+  let lastIdleRecoveryAt = 0
+
+  // sessionID -> {
+  //   xp, tools, failures, streak, lastTodoCompletedCount,
+  //   toolCounts: {name->n}, __lastToolWeight
+  // }
+  const turnAccum = new Map()
+
+  const getAccum = (sessionID) => {
+    const key = sessionID ?? "default"
+    let a = turnAccum.get(key)
+    if (!a) {
+      a = {
+        xp: 0,
+        tools: 0,
+        failures: 0,
+        streak: 0,
+        lastTodoCompletedCount: 0,
+        toolCounts: {},
+      }
+      turnAccum.set(key, a)
+    }
+    return a
+  }
+  const resetAccum = (sessionID) => {
+    const key = sessionID ?? "default"
+    turnAccum.delete(key)
+  }
+
+  // Helper: load → transform → save. Swallow errors so a buddy
+  // hiccup never breaks the host session.
+  const mutate = async (fn) => {
+    try {
+      const s = await persistence.load()
+      if (!s) return
+      const next = fn(s)
+      if (!next || next === s) return
+      await persistence.save(next)
+    } catch (err) {
+      console.error("[buddy] mutate error", err)
+    }
+  }
+
+  // User just submitted a prompt → buddy starts working.
+  api.event.on("session.next.prompted", async (ev) => {
+    const sessionID = ev?.properties?.sessionID
+    getAccum(sessionID) // ensure fresh accumulator exists
+    await mutate((s) => onPromptStart(s))
   })
+
+  // Tool succeeded → accumulate xp in memory, tiny mood bump on disk.
+  // Also tracks per-turn streaks: every Nth consecutive success without
+  // a failure grants a small bonus via onStreak.
+  api.event.on("session.next.tool.success", async (ev) => {
+    const sessionID = ev?.properties?.sessionID
+    const a = getAccum(sessionID)
+    const weight = a.__lastToolWeight ?? 2
+    a.xp = Math.min(TURN_XP_CAP, a.xp + weight)
+    a.tools += 1
+    a.streak += 1
+    a.__lastToolWeight = undefined
+    await mutate((s) => onToolSuccess(s))
+    // Award streak bonus on every Nth consecutive success (3, 6, 9, …)
+    if (a.streak > 0 && a.streak % STREAK_THRESHOLD === 0) {
+      await mutate((s) => onStreak(s))
+    }
+  })
+
+  // Tool was called → remember its xp weight so the matching success
+  // event can credit the right amount. Halve the weight once the same
+  // tool has been used more than SAME_TOOL_HALVE_AFTER times in this turn
+  // (anti-grind).
+  api.event.on("session.next.tool.called", (ev) => {
+    const sessionID = ev?.properties?.sessionID
+    const name = ev?.properties?.tool
+    const a = getAccum(sessionID)
+    const key = (name || "_").toLowerCase()
+    a.toolCounts[key] = (a.toolCounts[key] ?? 0) + 1
+    let weight = toolXp(name)
+    if (a.toolCounts[key] > SAME_TOOL_HALVE_AFTER) {
+      weight = Math.max(1, Math.floor(weight / 2))
+    }
+    a.__lastToolWeight = weight
+  })
+
+  // Tool failed → mood dip; break the streak; if too many in one turn,
+  // briefly scared.
+  api.event.on("session.next.tool.failed", async (ev) => {
+    const sessionID = ev?.properties?.sessionID
+    const a = getAccum(sessionID)
+    a.failures += 1
+    a.streak = 0
+    await mutate((s) => {
+      const dipped = onToolFailure(s)
+      return a.failures >= SCARED_FAILURE_THRESHOLD ? scaredState(dipped) : dipped
+    })
+  })
+
+  // Todo list updated → count newly-completed items, +5 xp each.
+  api.event.on("todo.updated", async (ev) => {
+    const sessionID = ev?.properties?.sessionID
+    const todos = ev?.properties?.todos ?? []
+    const completedNow = todos.filter((t) => t.status === "completed").length
+    const a = getAccum(sessionID)
+    const delta = completedNow - a.lastTodoCompletedCount
+    a.lastTodoCompletedCount = completedNow
+    if (delta <= 0) return
+    await mutate((s) => onTodoCompleted(s, delta))
+  })
+
+  // File edited by any tool → small hunger refill, throttled globally.
+  api.event.on("file.edited", async () => {
+    const now = Date.now()
+    if (now - lastFileEditedAt < FILE_EDIT_THROTTLE_MS) return
+    lastFileEditedAt = now
+    await mutate((s) => onFileEdited(s))
+  })
+
+  // Turn finished → settle accumulated xp + base bonus + work metabolism,
+  // celebrate, surface a toast if the buddy levelled up.
+  api.event.on("session.idle", async (ev) => {
+    const sessionID = ev?.properties?.sessionID
+    const a = getAccum(sessionID)
+    const earned = a.xp
+    const stats = { tools: a.tools, failures: a.failures }
+    resetAccum(sessionID)
+    try {
+      const before = await persistence.load()
+      if (!before) return
+      const after = onTurnDone(before, earned, stats)
+      await persistence.save(after)
+      if (after.level > before.level) {
+        api.ui.toast({
+          variant: "success",
+          title: "Level up!",
+          message: `${after.name} reached Lv${after.level} (+${10 + earned} xp).`,
+        })
+      } else if (earned > 0 || stats.tools > 0) {
+        api.ui.toast({
+          variant: "info",
+          title: "Turn complete",
+          message: `${after.name} earned ${10 + earned} xp from ${stats.tools} tool call${stats.tools === 1 ? "" : "s"}.`,
+          duration: 2000,
+        })
+      }
+    } catch (err) {
+      console.error("[buddy] turn settlement error", err)
+    }
+  })
+
+  // Session errored → spooked.
   api.event.on("session.error", async () => {
-    const s = await persistence.load()
-    if (!s) return
-    await persistence.save(scaredState(s))
+    await mutate((s) => scaredState(s))
   })
+
+  // User approved a permission → small hunger reward.
+  api.event.on("permission.replied", async (ev) => {
+    if (ev?.properties?.reply !== "once" && ev?.properties?.reply !== "always") return
+    await mutate((s) => onPermissionAllowed(s))
+  })
+
+  // Shell command finished successfully (the event itself doesn't carry
+  // an error flag, but a separate session.next.tool.failed will fire on
+  // genuine failure; here we treat any ended shell as productive work).
+  api.event.on("session.next.shell.ended", async () => {
+    await mutate((s) => onShellSuccess(s))
+  })
+
+  // Git branch switched → small hunger refill.
+  api.event.on("vcs.branch.updated", async () => {
+    await mutate((s) => onBranchUpdated(s))
+  })
+
+  // Session history was compacted → shed fatigue.
+  api.event.on("session.compacted", async () => {
+    await mutate((s) => onCompacted(s))
+  })
+
+  // Idle-recovery timer: if no prompt has been submitted for
+  // IDLE_RECOVERY_MS and we haven't already recovered recently, give a
+  // small energy bump. Skipped while the buddy is actively `working`.
+  const idleTimer = setInterval(async () => {
+    try {
+      const s = await persistence.load()
+      if (!s) return
+      if (s.state === "working") return
+      const now = Date.now()
+      const last = s.lastPromptAt ?? s.hatchedAt ?? now
+      if (now - last < IDLE_RECOVERY_MS) return
+      if (now - lastIdleRecoveryAt < IDLE_RECOVERY_MS) return
+      lastIdleRecoveryAt = now
+      await mutate((cur) => onIdleRecovery(cur))
+    } catch (err) {
+      console.error("[buddy] idle recovery error", err)
+    }
+  }, IDLE_RECOVERY_CHECK_MS)
+  api.lifecycle?.onDispose?.(() => clearInterval(idleTimer))
 }
 
 const plugin = { id: "opencode-buddy", tui }
