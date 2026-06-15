@@ -551,12 +551,12 @@ const tui = async (api) => {
   }, IDLE_RECOVERY_CHECK_MS)
   api.lifecycle?.onDispose?.(() => clearInterval(idleTimer))
 
-  // LRU sweep: archive session files that haven't been touched in
+  // LRU sweep: delete session files that haven't been touched in
   // ARCHIVE_AFTER_MS. Runs once at boot, then once a day.
   const runSweep = async () => {
     try {
       const n = await persistence.sweep(ARCHIVE_AFTER_MS)
-      if (n > 0) console.log(`[buddy] archived ${n} idle session file${n === 1 ? "" : "s"}`)
+      if (n > 0) console.log(`[buddy] swept ${n} idle session file${n === 1 ? "" : "s"}`)
     } catch (err) {
       console.error("[buddy] sweep error", err)
     }

@@ -14,7 +14,6 @@ import os from "node:os";
 
 const DIR = path.join(os.homedir(), ".config", "opencode-buddy");
 const SESSIONS_DIR = path.join(DIR, "sessions");
-const ARCHIVE_DIR = path.join(DIR, "archive");
 const LEGACY_FILE = path.join(DIR, "state.json");
 
 // "__default__" is the synthetic sessionID used by the LLM tool and
@@ -101,12 +100,11 @@ export async function mtime(sessionID) {
   }
 }
 
-// LRU maintenance. Moves session files whose `idleAt` is older than
-// `maxAgeMs` from sessions/ to archive/ (and creates the dir on
-// first use). Returns the number of files archived.
+// LRU maintenance. Deletes session files whose `idleAt` is older than
+// `maxAgeMs`. Returns the number of files removed.
 export async function sweep(maxAgeMs) {
   await ensureMigrated();
-  let archived = 0;
+  let removed = 0;
   let entries;
   try {
     entries = await fs.readdir(SESSIONS_DIR);
@@ -122,19 +120,13 @@ export async function sweep(maxAgeMs) {
       const data = JSON.parse(raw);
       const idle = typeof data.idleAt === "number" ? data.idleAt : data.lastTick;
       if (typeof idle !== "number" || now - idle < maxAgeMs) continue;
-      await fs.mkdir(ARCHIVE_DIR, { recursive: true });
-      const dest = path.join(ARCHIVE_DIR, name);
-      await fs.rename(fp, dest).catch(async () => {
-        // If rename fails (cross-device), fall back to copy+unlink.
-        await fs.copyFile(fp, dest);
-        await fs.unlink(fp);
-      });
-      archived += 1;
+      await fs.unlink(fp);
+      removed += 1;
     } catch {
       // Skip unreadable files; do not abort the whole sweep.
     }
   }
-  return archived;
+  return removed;
 }
 
 export async function listSessions() {

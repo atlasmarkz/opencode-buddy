@@ -28,7 +28,7 @@ A virtual ASCII pet companion that lives in the opencode TUI sidebar. **One budd
 
 Since v0.5.0 the buddy is **work-driven**: xp comes from the LLM calling tools, finishing turns, and you approving permissions — not from slash commands. Slash commands stay around for "I want to feed my pet right now" interactions. The buddy gets tired when you push it hard, naps to recover when you walk away, and slows down late at night.
 
-Since v0.6.0 the buddy is **per-session**: each opencode session has its own state file at `~/.config/opencode-buddy/sessions/<sessionID>.json`, so multiple windows and projects never share or fight over a buddy. Sessions idle for 30+ days are automatically archived.
+Since v0.6.0 the buddy is **per-session**: each opencode session has its own state file at `~/.config/opencode-buddy/sessions/<sessionID>.json`, so multiple windows and projects never share or fight over a buddy. Sessions idle for 30+ days are automatically deleted by a daily LRU sweep.
 
 ## Install
 
@@ -124,17 +124,15 @@ State lives in `~/.config/opencode-buddy/sessions/<sessionID>.json` — one file
 
 ```
 ~/.config/opencode-buddy/
-├── sessions/                      # active buddies
-│   ├── __default__.json           # fallback for LLM tool calls with no session arg
-│   ├── abc-123.json               # session "abc-123"
-│   └── def-456.json               # session "def-456"
-└── archive/                       # sessions idle > 30 days
-    └── ghi-789.json
+└── sessions/                      # active buddies
+    ├── __default__.json           # fallback for LLM tool calls with no session arg
+    ├── abc-123.json               # session "abc-123"
+    └── def-456.json               # session "def-456"
 ```
 
 - One file per opencode session. `1000 active sessions ≈ 500 KB`.
 - `__default__` is a synthetic session used when no real opencode session is in scope (e.g. the LLM tool without a `session` argument). Upgrades from v0.4/v0.5 transparently migrate the legacy global `state.json` into `sessions/__default__.json` on first read.
-- A background timer runs at plugin boot and once a day, sweeping any session whose `idleAt` is older than 30 days from `sessions/` to `archive/`. Files are moved, not deleted — you can hand-restore if needed.
+- A background timer runs at plugin boot and once a day, **deleting** any session file whose `idleAt` is older than 30 days. The buddy is gone for good — no archive folder to clean up later.
 - `/buddy-list` shows the active roster; the current session's buddy is marked with `→`.
 
 ### What you see in the sidebar
@@ -228,15 +226,11 @@ flowchart LR
         Default[("__default__.json")]
         Sess1[("abc-123.json")]
         Sess2[("def-456.json")]
-        ArchiveDir["archive/"]
-        Arch1[("old-sess.json")]
 
         StateRoot --> SessionsDir
-        StateRoot --> ArchiveDir
         SessionsDir --> Default
         SessionsDir --> Sess1
         SessionsDir --> Sess2
-        ArchiveDir --> Arch1
     end
 
     U -->|types| Prompt
@@ -256,7 +250,7 @@ flowchart LR
     AnimTick -->|"reads energy per session"| SessionsDir
 
     classDef store fill:#1e293b,stroke:#64748b,color:#f1f5f9
-    class Default,Sess1,Sess2,Arch1,TurnAccum store
+    class Default,Sess1,Sess2,TurnAccum store
 ```
 
 ### Boot flow
@@ -269,7 +263,7 @@ flowchart LR
    - 7 **slash commands** on the keymap (including `/buddy-list`).
    - 10+ **event hooks** on the session bus (prompted, tool.called/success/failed, todo, file.edited, permission.replied, shell.ended, vcs.branch.updated, session.compacted, session.idle, session.error). Each hook resolves the target `sessionID` from the event payload (or `lastActiveSessionID` for events that don't carry one) and mutates that session's file in `sessions/`, updating the in-memory `turnAccum` along the way.
    - A 60-second **idle-recovery timer** that iterates all sessions in `sessions/` and grants `+5 energy` to any whose `lastPromptAt` is older than 5 min.
-   - A daily **LRU sweep** that moves session files whose `idleAt` is older than 30 days from `sessions/` to `archive/`.
+   - A daily **LRU sweep** that deletes session files whose `idleAt` is older than 30 days.
 4. The TUI's `<Slot name="sidebar_content" />` resolves to the buddy's cached `View` (keyed by `session_id`). The View reads the frame signal and re-renders the buddy art on every tick.
 5. The View also runs a 1500 ms timer that polls its **own session's** file mtime. When the file changes (slash command or event hook wrote to it), the View reloads and re-renders.
 6. The animation timer advances unconditionally; per-session `sleeping` buddies just render the same static frame on every tick (cheap; the `renderFrame` is pure).
