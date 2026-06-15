@@ -86,7 +86,9 @@ async function BuddyPlugin() {
             if (sessions.length === 0) return "No session buddies yet.";
             return sessions
               .map((b) => {
-                const short = b.sessionID === "__default__" ? "default" : b.sessionID.slice(0, 8) + "…"
+                const short = b.sessionID === "__default__"
+                  ? "default"
+                  : b.sessionID.replace(/^ses_/, "").slice(0, 6) + "…"
                 return `· ${b.name} the ${b.species} Lv${b.level} (${short})`
               })
               .join("\n");

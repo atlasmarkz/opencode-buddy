@@ -263,7 +263,9 @@ const tui = async (api) => {
     const lines = sessions
       .map((b) => {
         const tag = b.sessionID === cur ? "→" : "·"
-        const short = b.sessionID === "__default__" ? "default" : b.sessionID.slice(0, 8) + "…"
+        const short = b.sessionID === "__default__"
+          ? "default"
+          : b.sessionID.replace(/^ses_/, "").slice(0, 6) + "…"
         return `${tag} ${b.name} the ${b.species} Lv${b.level} (${short})`
       })
       .join("\n")
