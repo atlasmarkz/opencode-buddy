@@ -188,7 +188,7 @@ flowchart LR
         RefreshTick[setInterval 1500ms<br/>mtime poll]
         IdleTimer[setInterval 60s<br/>idle-recovery]
         Hooks["event hooks (10+)<br/>prompted / tool.called /<br/>tool.success / tool.failed /<br/>todo / file.edited / perm /<br/>shell / branch / compacted /<br/>idle / error"]
-        TurnAccum[(("turnAccum<br/>per-session memory<br/>xp · tools · failures ·<br/>streak · toolCounts")) ]
+        TurnAccum[("turnAccum<br/>per-session memory<br/>xp · tools · failures ·<br/>streak · toolCounts")]
         SlashCmds["slash commands<br/>feed / play / rest /<br/>status / rename / switch"]
 
         TUIEntry --> FrameSignal
