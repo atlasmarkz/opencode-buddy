@@ -85,7 +85,10 @@ async function BuddyPlugin() {
             const sessions = await persistence.listSessions();
             if (sessions.length === 0) return "No session buddies yet.";
             return sessions
-              .map((b) => `· ${b.name} the ${b.species} Lv${b.level} (${b.sessionID})`)
+              .map((b) => {
+                const short = b.sessionID === "__default__" ? "default" : b.sessionID.slice(0, 8) + "…"
+                return `· ${b.name} the ${b.species} Lv${b.level} (${short})`
+              })
               .join("\n");
           }
 
