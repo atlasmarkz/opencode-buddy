@@ -10,6 +10,9 @@ export const DEFAULT_STATE = {
   lastFed: Date.now(),
   lastPlayed: Date.now(),
   lastTick: Date.now(),
+  // idleAt is bumped on every state write. The LRU sweeper uses it
+  // to decide which session files to archive.
+  idleAt: Date.now(),
   state: "idle",
   stateUntil: 0,
   stateReason: "",

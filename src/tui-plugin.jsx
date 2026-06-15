@@ -29,8 +29,13 @@ import { renderFrame, frameCount, frameIntervalMs, SPECIES } from "./species.js"
 const ANIMATION_TICK_MS = frameIntervalMs()
 const REFRESH_TICK_MS = 1500
 
+const FALLBACK_SESSION = "__default__"
+
+const norm = (sid) => (sid && typeof sid === "string" ? sid : FALLBACK_SESSION)
+
 function View(props) {
   const api = props.api
+  const sessionID = norm(props.session_id)
   const theme = () => api.theme.current
   const frame = props.frame
   const [state, setState] = createSignal(null)
@@ -39,8 +44,9 @@ function View(props) {
 
   const refresh = async () => {
     try {
-      const mt = await persistence.mtime()
+      const mt = await persistence.mtime(sessionID)
       if (mt === 0) {
+        // No file yet → hatch a fresh buddy for this session
         const fresh = {
           species: "duck",
           name: "Quack",
@@ -53,11 +59,12 @@ function View(props) {
           lastFed: Date.now(),
           lastPlayed: Date.now(),
           lastTick: Date.now(),
+          idleAt: Date.now(),
           state: "idle",
           stateUntil: 0,
           stateReason: "",
         }
-        await persistence.save(fresh)
+        await persistence.save(sessionID, fresh)
         setLastMtime(Date.now())
         setState(fresh)
         setTick(tick() + 1)
@@ -65,13 +72,13 @@ function View(props) {
       }
       if (mt !== lastMtime()) {
         setLastMtime(mt)
-        const onDisk = await persistence.load()
+        const onDisk = await persistence.load(sessionID)
         if (onDisk) {
           const ticked = tickState(onDisk)
           const derived = deriveState(ticked)
           setState(derived)
           setTick(tick() + 1)
-          persistence.save(derived).catch(() => {})
+          persistence.save(sessionID, derived).catch(() => {})
         }
       }
     } catch (err) {
@@ -88,16 +95,8 @@ function View(props) {
   // without owning a timer of its own.
 
   const current = state
-  const species = () => {
-    const v = current()
-    return v ? v.species : "duck"
-  }
-  // Only animate when the buddy is awake (not sleeping). Sleeping
-  // buddies hold a single frame so the user can see they're resting.
-  const buddyState = () => {
-    const v = current()
-    return v ? v.state : "idle"
-  }
+  const species = () => (current() ? current().species : "duck")
+  const buddyState = () => (current() ? current().state : "idle")
   const fc = createMemo(() => frameCount(species(), buddyState()))
   const lines = createMemo(() => renderFrame(species(), buddyState(), frame() % Math.max(1, fc())))
 
@@ -140,30 +139,21 @@ function View(props) {
 }
 
 const tui = async (api) => {
-  // The animation timer lives at the plugin level so it survives View
-  // remounts. We expose a single global frame counter via a SolidJS
-  // signal stored on the api object, which every View can read.
-  // This decouples the animation loop from any individual View's
-  // lifecycle.
+  // Plugin-level frame signal. Always advances; per-session sleeping
+  // buddies just render the same frame, which is cheap and simpler
+  // than per-session signals.
   const [getFrame, setFrame] = createSignal(0)
   api.__buddyFrame = { getFrame, setFrame }
-  setInterval(async () => {
-    // Read current state from disk. If the buddy is sleeping or has
-    // very low energy, freeze the frame so animation visually pauses
-    // — a sleeping buddy should not be flickering.
-    const s = await persistence.load()
-    const sleeping = s && (s.state === "sleeping" || s.energy < 20)
-    if (!sleeping) setFrame((f) => f + 1)
-  }, ANIMATION_TICK_MS)
+  setInterval(() => setFrame((f) => f + 1), ANIMATION_TICK_MS)
 
-  // Cache the View element so slot re-renders don't recreate it.
+  // Per-session View cache so the View survives slot re-renders.
   const viewCache = new Map()
 
   api.slots.register({
     order: 50,
     slots: {
       sidebar_content(_ctx, props) {
-        const key = props.session_id ?? "default"
+        const key = norm(props.session_id)
         if (!viewCache.has(key)) {
           viewCache.set(key, <View api={api} session_id={props.session_id} frame={getFrame} />)
         }
@@ -172,30 +162,57 @@ const tui = async (api) => {
     },
   })
 
+  // The current opencode session from the TUI route. Fallback to
+  // FALLBACK_SESSION when on the home screen (no active session).
+  const currentSessionID = () => {
+    try {
+      const r = api.route?.current
+      if (r && r.name === "session" && r.params?.sessionID) return norm(r.params.sessionID)
+    } catch {}
+    return FALLBACK_SESSION
+  }
+
+  // Mutate helper: load → transform → save, per session. Swallow errors
+  // so a buddy hiccup never breaks the host session.
+  const mutate = async (sessionID, fn) => {
+    try {
+      const sid = norm(sessionID)
+      const s = await persistence.load(sid)
+      if (!s) return null
+      const next = fn(s)
+      if (!next || next === s) return next
+      await persistence.save(sid, next)
+      return next
+    } catch (err) {
+      console.error("[buddy] mutate error", err)
+      return null
+    }
+  }
+
+  // ---------- Slash commands ----------
+
   const feedBuddy = async () => {
-    const s = await persistence.load()
-    if (!s) return
-    const next = feed(s)
-    await persistence.save(next)
-    api.ui.toast({ variant: "success", title: "Yum!", message: `${next.name} ate a snack.` })
+    const sid = currentSessionID()
+    const next = await mutate(sid, (s) => feed(s))
+    if (next) api.ui.toast({ variant: "success", title: "Yum!", message: `${next.name} ate a snack.` })
   }
   const playBuddy = async () => {
-    const s = await persistence.load()
-    if (!s) return
-    const next = play(s)
-    await persistence.save(next)
-    api.ui.toast({ variant: "success", title: "Woohoo!", message: `${next.name} played (+1xp).` })
+    const sid = currentSessionID()
+    const next = await mutate(sid, (s) => play(s))
+    if (next) api.ui.toast({ variant: "success", title: "Woohoo!", message: `${next.name} played (+1xp).` })
   }
   const restBuddy = async () => {
-    const s = await persistence.load()
-    if (!s) return
-    const next = rest(s)
-    await persistence.save(next)
-    api.ui.toast({ variant: "info", title: "Zzz", message: `${next.name} is napping.` })
+    const sid = currentSessionID()
+    const next = await mutate(sid, (s) => rest(s))
+    if (next) api.ui.toast({ variant: "info", title: "Zzz", message: `${next.name} is napping.` })
   }
   const statusBuddy = async () => {
-    const s = await persistence.load()
-    if (!s) return
+    const sid = currentSessionID()
+    const s = await persistence.load(sid)
+    if (!s) {
+      api.ui.toast({ variant: "info", title: "No buddy", message: "Open a session to hatch a buddy." })
+      return
+    }
     api.ui.toast({
       variant: "info",
       title: `${s.name} the ${s.species}`,
@@ -208,11 +225,9 @@ const tui = async (api) => {
         title="Rename buddy"
         placeholder="New name (max 20 chars)"
         onConfirm={async (value) => {
-          const s = await persistence.load()
-          if (!s) return
-          const next = rename(s, value)
-          await persistence.save(next)
-          api.ui.toast({ variant: "success", title: "Renamed", message: `Now called ${next.name}.` })
+          const sid = currentSessionID()
+          const next = await mutate(sid, (s) => rename(s, value))
+          if (next) api.ui.toast({ variant: "success", title: "Renamed", message: `Now called ${next.name}.` })
         }}
         onCancel={() => {}}
       />
@@ -223,11 +238,9 @@ const tui = async (api) => {
       title: sp,
       value: sp,
       onSelect: async () => {
-        const s = await persistence.load()
-        if (!s) return
-        const next = switchSpecies(s, sp)
-        await persistence.save(next)
-        api.ui.toast({ variant: "success", title: "Morphed", message: `Now a ${sp}.` })
+        const sid = currentSessionID()
+        const next = await mutate(sid, (s) => switchSpecies(s, sp))
+        if (next) api.ui.toast({ variant: "success", title: "Morphed", message: `Now a ${sp}.` })
         api.ui.dialog.clear()
       },
     }))
@@ -238,6 +251,27 @@ const tui = async (api) => {
         onSelect={() => {}}
       />
     ))
+  }
+
+  const listBuddies = async () => {
+    const sessions = await persistence.listSessions()
+    if (sessions.length === 0) {
+      api.ui.toast({ variant: "info", title: "No buddies", message: "Open a session to hatch one." })
+      return
+    }
+    const cur = currentSessionID()
+    const lines = sessions
+      .map((b) => {
+        const tag = b.sessionID === cur ? "→" : "·"
+        return `${tag} ${b.name} the ${b.species} Lv${b.level} (${b.sessionID})`
+      })
+      .join("\n")
+    api.ui.toast({
+      variant: "info",
+      title: `${sessions.length} session${sessions.length === 1 ? "" : "s"}`,
+      message: lines,
+      duration: 5000,
+    })
   }
 
   api.keymap.registerLayer({
@@ -289,6 +323,17 @@ const tui = async (api) => {
       },
       {
         namespace: "palette",
+        name: "buddy.list",
+        title: "List all session buddies",
+        slashName: "buddy-list",
+        category: "Buddy",
+        run() {
+          api.ui.dialog.clear()
+          void listBuddies()
+        },
+      },
+      {
+        namespace: "palette",
         name: "buddy.rename",
         title: "Rename buddy",
         slashName: "buddy-rename",
@@ -311,97 +356,69 @@ const tui = async (api) => {
     bindings: [],
   })
 
-  // ---------- Work-driven progression ----------
-  //
-  // Buddy's xp now comes from real coding activity, not just /buddy-play.
-  // We listen to opencode session events, accumulate per-turn xp in
-  // memory (to avoid hammering the disk), and settle once at turn end.
+  // ---------- Work-driven progression (per session) ----------
 
-  const TURN_XP_CAP = 30 // hard cap so a single noisy turn can't level-flood
+  const TURN_XP_CAP = 30
   const FILE_EDIT_THROTTLE_MS = 30_000
   const SCARED_FAILURE_THRESHOLD = 2
-  const STREAK_THRESHOLD = 3 // award streak bonus on Nth consecutive success
-  const SAME_TOOL_HALVE_AFTER = 5 // 6th+ call of the same tool in a turn → xp halved
-  const IDLE_RECOVERY_MS = 5 * 60_000 // 5 min of no prompt → recovery eligible
-  const IDLE_RECOVERY_CHECK_MS = 60_000 // poll every minute
+  const STREAK_THRESHOLD = 3
+  const SAME_TOOL_HALVE_AFTER = 5
+  const IDLE_RECOVERY_MS = 5 * 60_000
+  const IDLE_RECOVERY_CHECK_MS = 60_000
+  const ARCHIVE_AFTER_MS = 30 * 24 * 60 * 60_000 // 30 days idle → archive
+  const ARCHIVE_CHECK_MS = 24 * 60 * 60_000 // check once per day
 
+  // File-edited is global (no sessionID in the event). Apply to the
+  // most recently active session. Global throttle prevents spam.
   let lastFileEditedAt = 0
-  let lastIdleRecoveryAt = 0
+  let lastActiveSessionID = FALLBACK_SESSION
+  const rememberActive = (sid) => {
+    const n = norm(sid)
+    if (n) lastActiveSessionID = n
+  }
 
-  // sessionID -> {
-  //   xp, tools, failures, streak, lastTodoCompletedCount,
-  //   toolCounts: {name->n}, __lastToolWeight
-  // }
+  // sessionID -> { xp, tools, failures, streak, lastTodoCompletedCount, toolCounts, __lastToolWeight }
   const turnAccum = new Map()
 
   const getAccum = (sessionID) => {
-    const key = sessionID ?? "default"
+    const key = norm(sessionID)
     let a = turnAccum.get(key)
     if (!a) {
-      a = {
-        xp: 0,
-        tools: 0,
-        failures: 0,
-        streak: 0,
-        lastTodoCompletedCount: 0,
-        toolCounts: {},
-      }
+      a = { xp: 0, tools: 0, failures: 0, streak: 0, lastTodoCompletedCount: 0, toolCounts: {} }
       turnAccum.set(key, a)
     }
     return a
   }
-  const resetAccum = (sessionID) => {
-    const key = sessionID ?? "default"
-    turnAccum.delete(key)
-  }
+  const resetAccum = (sessionID) => turnAccum.delete(norm(sessionID))
 
-  // Helper: load → transform → save. Swallow errors so a buddy
-  // hiccup never breaks the host session.
-  const mutate = async (fn) => {
-    try {
-      const s = await persistence.load()
-      if (!s) return
-      const next = fn(s)
-      if (!next || next === s) return
-      await persistence.save(next)
-    } catch (err) {
-      console.error("[buddy] mutate error", err)
-    }
-  }
-
-  // User just submitted a prompt → buddy starts working.
+  // User submitted a prompt → buddy starts working.
   api.event.on("session.next.prompted", async (ev) => {
-    const sessionID = ev?.properties?.sessionID
-    getAccum(sessionID) // ensure fresh accumulator exists
-    await mutate((s) => onPromptStart(s))
+    const sid = ev?.properties?.sessionID
+    rememberActive(sid)
+    getAccum(sid)
+    await mutate(sid, (s) => onPromptStart(s))
   })
 
-  // Tool succeeded → accumulate xp in memory, tiny mood bump on disk.
-  // Also tracks per-turn streaks: every Nth consecutive success without
-  // a failure grants a small bonus via onStreak.
   api.event.on("session.next.tool.success", async (ev) => {
-    const sessionID = ev?.properties?.sessionID
-    const a = getAccum(sessionID)
+    const sid = ev?.properties?.sessionID
+    rememberActive(sid)
+    const a = getAccum(sid)
     const weight = a.__lastToolWeight ?? 2
     a.xp = Math.min(TURN_XP_CAP, a.xp + weight)
     a.tools += 1
     a.streak += 1
     a.__lastToolWeight = undefined
-    await mutate((s) => onToolSuccess(s))
-    // Award streak bonus on every Nth consecutive success (3, 6, 9, …)
+    await mutate(sid, (s) => onToolSuccess(s))
     if (a.streak > 0 && a.streak % STREAK_THRESHOLD === 0) {
-      await mutate((s) => onStreak(s))
+      await mutate(sid, (s) => onStreak(s))
     }
   })
 
-  // Tool was called → remember its xp weight so the matching success
-  // event can credit the right amount. Halve the weight once the same
-  // tool has been used more than SAME_TOOL_HALVE_AFTER times in this turn
-  // (anti-grind).
   api.event.on("session.next.tool.called", (ev) => {
-    const sessionID = ev?.properties?.sessionID
+    const sid = ev?.properties?.sessionID
+    rememberActive(sid)
     const name = ev?.properties?.tool
-    const a = getAccum(sessionID)
+    const a = getAccum(sid)
     const key = (name || "_").toLowerCase()
     a.toolCounts[key] = (a.toolCounts[key] ?? 0) + 1
     let weight = toolXp(name)
@@ -411,52 +428,50 @@ const tui = async (api) => {
     a.__lastToolWeight = weight
   })
 
-  // Tool failed → mood dip; break the streak; if too many in one turn,
-  // briefly scared.
   api.event.on("session.next.tool.failed", async (ev) => {
-    const sessionID = ev?.properties?.sessionID
-    const a = getAccum(sessionID)
+    const sid = ev?.properties?.sessionID
+    rememberActive(sid)
+    const a = getAccum(sid)
     a.failures += 1
     a.streak = 0
-    await mutate((s) => {
+    await mutate(sid, (s) => {
       const dipped = onToolFailure(s)
       return a.failures >= SCARED_FAILURE_THRESHOLD ? scaredState(dipped) : dipped
     })
   })
 
-  // Todo list updated → count newly-completed items, +5 xp each.
   api.event.on("todo.updated", async (ev) => {
-    const sessionID = ev?.properties?.sessionID
+    const sid = ev?.properties?.sessionID
+    rememberActive(sid)
     const todos = ev?.properties?.todos ?? []
     const completedNow = todos.filter((t) => t.status === "completed").length
-    const a = getAccum(sessionID)
+    const a = getAccum(sid)
     const delta = completedNow - a.lastTodoCompletedCount
     a.lastTodoCompletedCount = completedNow
     if (delta <= 0) return
-    await mutate((s) => onTodoCompleted(s, delta))
+    await mutate(sid, (s) => onTodoCompleted(s, delta))
   })
 
-  // File edited by any tool → small hunger refill, throttled globally.
+  // No sessionID in file.edited; route to last active session.
   api.event.on("file.edited", async () => {
     const now = Date.now()
     if (now - lastFileEditedAt < FILE_EDIT_THROTTLE_MS) return
     lastFileEditedAt = now
-    await mutate((s) => onFileEdited(s))
+    await mutate(lastActiveSessionID, (s) => onFileEdited(s))
   })
 
-  // Turn finished → settle accumulated xp + base bonus + work metabolism,
-  // celebrate, surface a toast if the buddy levelled up.
   api.event.on("session.idle", async (ev) => {
-    const sessionID = ev?.properties?.sessionID
-    const a = getAccum(sessionID)
+    const sid = ev?.properties?.sessionID
+    rememberActive(sid)
+    const a = getAccum(sid)
     const earned = a.xp
     const stats = { tools: a.tools, failures: a.failures }
-    resetAccum(sessionID)
+    resetAccum(sid)
     try {
-      const before = await persistence.load()
+      const before = await persistence.load(norm(sid))
       if (!before) return
       const after = onTurnDone(before, earned, stats)
-      await persistence.save(after)
+      await persistence.save(norm(sid), after)
       if (after.level > before.level) {
         api.ui.toast({
           variant: "success",
@@ -476,53 +491,76 @@ const tui = async (api) => {
     }
   })
 
-  // Session errored → spooked.
-  api.event.on("session.error", async () => {
-    await mutate((s) => scaredState(s))
+  api.event.on("session.error", async (ev) => {
+    const sid = ev?.properties?.sessionID
+    rememberActive(sid)
+    await mutate(sid, (s) => scaredState(s))
   })
 
-  // User approved a permission → small hunger reward.
   api.event.on("permission.replied", async (ev) => {
+    const sid = ev?.properties?.sessionID
+    rememberActive(sid)
     if (ev?.properties?.reply !== "once" && ev?.properties?.reply !== "always") return
-    await mutate((s) => onPermissionAllowed(s))
+    await mutate(sid, (s) => onPermissionAllowed(s))
   })
 
-  // Shell command finished successfully (the event itself doesn't carry
-  // an error flag, but a separate session.next.tool.failed will fire on
-  // genuine failure; here we treat any ended shell as productive work).
-  api.event.on("session.next.shell.ended", async () => {
-    await mutate((s) => onShellSuccess(s))
+  api.event.on("session.next.shell.ended", async (ev) => {
+    const sid = ev?.properties?.sessionID
+    rememberActive(sid)
+    await mutate(sid, (s) => onShellSuccess(s))
   })
 
-  // Git branch switched → small hunger refill.
+  // vcs.branch.updated has no sessionID; route to last active.
   api.event.on("vcs.branch.updated", async () => {
-    await mutate((s) => onBranchUpdated(s))
+    await mutate(lastActiveSessionID, (s) => onBranchUpdated(s))
   })
 
-  // Session history was compacted → shed fatigue.
-  api.event.on("session.compacted", async () => {
-    await mutate((s) => onCompacted(s))
+  api.event.on("session.compacted", async (ev) => {
+    const sid = ev?.properties?.sessionID
+    rememberActive(sid)
+    await mutate(sid, (s) => onCompacted(s))
   })
 
-  // Idle-recovery timer: if no prompt has been submitted for
-  // IDLE_RECOVERY_MS and we haven't already recovered recently, give a
-  // small energy bump. Skipped while the buddy is actively `working`.
+  // Idle-recovery + LRU sweep. Iterates all session files so inactive
+  // sessions also recover (and so the sweep sees them).
   const idleTimer = setInterval(async () => {
     try {
-      const s = await persistence.load()
-      if (!s) return
-      if (s.state === "working") return
+      const sessions = await persistence.listSessions()
       const now = Date.now()
-      const last = s.lastPromptAt ?? s.hatchedAt ?? now
-      if (now - last < IDLE_RECOVERY_MS) return
-      if (now - lastIdleRecoveryAt < IDLE_RECOVERY_MS) return
-      lastIdleRecoveryAt = now
-      await mutate((cur) => onIdleRecovery(cur))
+      for (const meta of sessions) {
+        const sid = meta.sessionID
+        const s = await persistence.load(sid)
+        if (!s) continue
+        // Don't recover while a session is actively in `working` state.
+        if (s.state === "working") continue
+        const last = s.lastPromptAt ?? s.hatchedAt ?? now
+        if (now - last < IDLE_RECOVERY_MS) continue
+        // Per-session cooldown to avoid stacking recovery every minute.
+        if (now - (s.lastIdleRecoveryAt ?? 0) < IDLE_RECOVERY_MS) continue
+        await mutate(sid, (cur) => {
+          const next = onIdleRecovery(cur)
+          return { ...next, lastIdleRecoveryAt: now }
+        })
+      }
     } catch (err) {
       console.error("[buddy] idle recovery error", err)
     }
   }, IDLE_RECOVERY_CHECK_MS)
   api.lifecycle?.onDispose?.(() => clearInterval(idleTimer))
+
+  // LRU sweep: archive session files that haven't been touched in
+  // ARCHIVE_AFTER_MS. Runs once at boot, then once a day.
+  const runSweep = async () => {
+    try {
+      const n = await persistence.sweep(ARCHIVE_AFTER_MS)
+      if (n > 0) console.log(`[buddy] archived ${n} idle session file${n === 1 ? "" : "s"}`)
+    } catch (err) {
+      console.error("[buddy] sweep error", err)
+    }
+  }
+  void runSweep()
+  const sweepTimer = setInterval(runSweep, ARCHIVE_CHECK_MS)
+  api.lifecycle?.onDispose?.(() => clearInterval(sweepTimer))
 }
 
 const plugin = { id: "opencode-buddy", tui }
