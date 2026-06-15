@@ -242,18 +242,18 @@ flowchart LR
     U -->|types| Prompt
     Prompt -->|/buddy-feed etc| Keymap
     Keymap --> SlashCmds
-    SlashCmds -->|read+write (per current session)| SessionsDir
+    SlashCmds -->|"read+write per session"| SessionsDir
     SlashCmds -->|toast feedback| U
 
     Slots -->|invokes renderer| View
     View -->|render frame| Sidebar
-    View -->|reads mtime (per session)| SessionsDir
+    View -->|"reads mtime per session"| SessionsDir
     RefreshTick -->|state changed| View
     Bus -->|10+ event types| Hooks
-    Hooks -->|mutate (per session)| SessionsDir
+    Hooks -->|"mutate per session"| SessionsDir
     Hooks -->|Level up! / Turn complete toast| U
-    IdleTimer -->|+5 energy (per session)| SessionsDir
-    AnimTick -->|reads energy (per session)| SessionsDir
+    IdleTimer -->|"+5 energy per session"| SessionsDir
+    AnimTick -->|"reads energy per session"| SessionsDir
 
     classDef store fill:#1e293b,stroke:#64748b,color:#f1f5f9
     class Default,Sess1,Sess2,Arch1,TurnAccum store
