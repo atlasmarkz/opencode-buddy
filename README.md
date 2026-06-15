@@ -132,7 +132,7 @@ State lives in `~/.config/opencode-buddy/sessions/<sessionID>.json` — one file
 
 - One file per opencode session. `1000 active sessions ≈ 500 KB`.
 - `__default__` is a synthetic session used when no real opencode session is in scope (e.g. the LLM tool without a `session` argument). Upgrades from v0.4/v0.5 transparently migrate the legacy global `state.json` into `sessions/__default__.json` on first read.
-- A background timer runs at plugin boot and once a day, **deleting** any session file whose `idleAt` is older than 30 days. The buddy is gone for good — no archive folder to clean up later.
+- A background timer runs at plugin boot and once a day, **deleting** any session file whose `idleAt` is older than 14 days. The buddy is gone for good — no archive folder to clean up later.
 - `/buddy-list` shows the active roster; the current session's buddy is marked with `→`.
 
 ### What you see in the sidebar
@@ -263,7 +263,7 @@ flowchart LR
    - 7 **slash commands** on the keymap (including `/buddy-list`).
    - 10+ **event hooks** on the session bus (prompted, tool.called/success/failed, todo, file.edited, permission.replied, shell.ended, vcs.branch.updated, session.compacted, session.idle, session.error). Each hook resolves the target `sessionID` from the event payload (or `lastActiveSessionID` for events that don't carry one) and mutates that session's file in `sessions/`, updating the in-memory `turnAccum` along the way.
    - A 60-second **idle-recovery timer** that iterates all sessions in `sessions/` and grants `+5 energy` to any whose `lastPromptAt` is older than 5 min.
-   - A daily **LRU sweep** that deletes session files whose `idleAt` is older than 30 days.
+   - A daily **LRU sweep** that deletes session files whose `idleAt` is older than 14 days.
 4. The TUI's `<Slot name="sidebar_content" />` resolves to the buddy's cached `View` (keyed by `session_id`). The View reads the frame signal and re-renders the buddy art on every tick.
 5. The View also runs a 1500 ms timer that polls its **own session's** file mtime. When the file changes (slash command or event hook wrote to it), the View reloads and re-renders.
 6. The animation timer advances unconditionally; per-session `sleeping` buddies just render the same static frame on every tick (cheap; the `renderFrame` is pure).

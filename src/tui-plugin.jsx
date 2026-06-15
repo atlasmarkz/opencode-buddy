@@ -368,7 +368,7 @@ const tui = async (api) => {
   const SAME_TOOL_HALVE_AFTER = 5
   const IDLE_RECOVERY_MS = 5 * 60_000
   const IDLE_RECOVERY_CHECK_MS = 60_000
-  const ARCHIVE_AFTER_MS = 30 * 24 * 60 * 60_000 // 30 days idle → archive
+  const IDLE_DELETE_MS = 14 * 24 * 60 * 60_000 // 14 days idle → delete
   const ARCHIVE_CHECK_MS = 24 * 60 * 60_000 // check once per day
 
   // File-edited is global (no sessionID in the event). Apply to the
@@ -552,10 +552,10 @@ const tui = async (api) => {
   api.lifecycle?.onDispose?.(() => clearInterval(idleTimer))
 
   // LRU sweep: delete session files that haven't been touched in
-  // ARCHIVE_AFTER_MS. Runs once at boot, then once a day.
+  // IDLE_DELETE_MS. Runs once at boot, then once a day.
   const runSweep = async () => {
     try {
-      const n = await persistence.sweep(ARCHIVE_AFTER_MS)
+      const n = await persistence.sweep(IDLE_DELETE_MS)
       if (n > 0) console.log(`[buddy] swept ${n} idle session file${n === 1 ? "" : "s"}`)
     } catch (err) {
       console.error("[buddy] sweep error", err)
