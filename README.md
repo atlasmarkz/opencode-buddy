@@ -1,6 +1,6 @@
 # opencode-buddy
 
-A virtual ASCII pet companion that lives in the opencode TUI sidebar. Hatches, feeds, plays, and reacts to what you're coding — all without leaving opencode.
+A virtual ASCII pet companion that lives in the opencode TUI sidebar. Hatches, grows, and **earns xp from your actual coding** — every tool call, every completed turn, every approved permission feeds the buddy.
 
 ![Demo — the buddy in the opencode TUI sidebar (toast notification on the left, buddy panel on the right with hunger / happy / energy bars and a transitioning state)](assets/buddy-demo.gif)
 
@@ -26,7 +26,7 @@ A virtual ASCII pet companion that lives in the opencode TUI sidebar. Hatches, f
 └──────────────────────────┘
 ```
 
-The buddy renders inside the TUI sidebar, reacts to your coding sessions (cheering when a turn finishes, getting scared on errors, falling asleep when low on energy), and can be controlled via slash commands typed directly in the prompt.
+Since v0.5.0 the buddy is **work-driven**: xp comes from the LLM calling tools, finishing turns, and you approving permissions — not from slash commands. Slash commands stay around for "I want to feed my pet right now" interactions. The buddy gets tired when you push it hard, naps to recover when you walk away, and slows down late at night.
 
 ## Install
 
@@ -62,23 +62,58 @@ Restart opencode. The buddy appears in the sidebar.
 
 ## Usage
 
-Once installed, type `/` in the prompt to see the slash commands. The buddy ships with six:
+### Slash commands
+
+Type `/` in the prompt to see the slash commands. The buddy ships with six:
 
 | Slash command | Effect |
 | --- | --- |
 | `/buddy` | Show the buddy's current stats as a toast |
 | `/buddy-feed` | Feed the buddy (+25 hunger, -5 energy) |
-| `/buddy-play` | Play with the buddy (+20 happiness, +5 xp, -5 hunger) |
+| `/buddy-play` | Play with the buddy (+15 happiness, +1 xp, -10 energy, -5 hunger) |
 | `/buddy-rest` | Let the buddy rest (+30 energy) |
 | `/buddy-rename` | Open a prompt to rename the buddy (max 20 chars) |
 | `/buddy-switch` | Open a picker to switch to duck, cat, dragon, axolotl, robot, or ghost |
 
-The buddy also reacts passively to your sessions:
+`/buddy-play` only gives +1 xp — meaningful xp comes from coding (see below).
 
-- `session.idle` → 4 second **celebrating** state
-- `session.error` → 5 second **scared** state
-- Energy < 20 → automatically transitions to **sleeping** (animation pauses)
-- Hunger < 25 → transitions to **scared** for 30 seconds
+### Automatic reactions (work-driven xp & rewards)
+
+The buddy listens to opencode's live session events. Every event tweaks the buddy's stats so the sidebar actually drifts in response to what you're doing:
+
+| Trigger | Effect |
+| --- | --- |
+| Prompt submitted | enter `working` state, mark `lastPromptAt` |
+| Tool call succeeds | +xp per tool (read=1, edit/write/bash=3, others=2), +0.2 happy |
+| 3 consecutive tool successes (no failure) | +5 xp streak bonus |
+| Same tool used >5 times in one turn | xp halved for that tool (anti-grind) |
+| Tool call fails | -1 happy, -0.5 energy, streak reset; 2+ fails → `scared` |
+| Todo marked completed | +5 xp per item |
+| File edited (`file.edited`) | +1 hunger (30s global throttle) |
+| Shell command finished | +1 hunger, +1 energy |
+| Permission granted (once/always) | +3 hunger, +1 happy |
+| Git branch switched | +3 hunger, +1 happy |
+| Session history compacted | +10 energy, +2 happy |
+| Idle >5 min without a prompt | +5 energy (5 min cooldown) |
+| **Turn finished (`session.idle`)** | +10 base xp + accumulated (cap 30/turn), 3s `celebrating`, toast `Turn complete +N xp` or `Level up!` |
+| Session error | 5s `scared` |
+| **Level up** | +5 hunger, +3 energy, +3 happy |
+
+### Passive metabolism
+
+Between events the buddy slowly drifts on a natural clock:
+
+| Stat | Per minute | Notes |
+| --- | --- | --- |
+| hunger | -0.3 | always |
+| happiness | -0.2 | always |
+| energy | -0.15 (×1.5 at 23:00–05:00) | drains 1.5× faster late at night |
+| energy (sleeping) | **+1.0** | the buddy heals itself if you walk away |
+
+Hard thresholds:
+
+- **Energy < 20** → `sleeping` (animation pauses; energy recovers passively)
+- **Hunger < 25** → `scared` for 30 s
 
 State is shared across all opencode sessions via `~/.config/opencode-buddy/state.json`. Open a session in a different terminal and your buddy is still there.
 
@@ -92,10 +127,10 @@ The sidebar shows the buddy's species-specific ASCII art, plus four lines under 
 hunger |████░░░░░░| 79         <- hunger bar
 happy  |███░░░░░░░| 60         <- happiness bar
 energy |███████░░░| 70         <- energy bar
-idle  Lv1  xp5/50              <- state label + level + xp progress
+idle  Lv1  xp5/50              <- state label + level + xp progress (xp needed = level * 50)
 ```
 
-The bottom state label reflects the persisted `state` field in `state.json`. It changes on `session.idle` (4 s "celebrating"), `session.error` (5 s "scared"), and on energy/hunger thresholds (auto "sleeping" or "scared"). The art's idle state has 3 frames; the sidebar re-renders the current frame each time `state.json` is reloaded.
+The bottom state label reflects the persisted `state` field in `state.json`. It changes on session events (`celebrating` / `scared` / `working`) and on energy/hunger thresholds (auto `sleeping` or `scared`). The art's idle state has 3 frames; the sidebar re-renders the current frame each time the plugin-level frame signal advances.
 
 ## Six species
 
@@ -135,6 +170,7 @@ flowchart LR
         Prompt[Prompt component]
         Slots{{"slot registry<br/>sidebar_content"}}
         Keymap{{"keymap<br/>(slash commands)"}}
+        Bus{{"event bus<br/>(session/tool/file/<br/>perm/todo/vcs/...)"}}
 
         Config --> Runtime
         Runtime --> Slots
@@ -150,22 +186,23 @@ flowchart LR
         FrameSignal[("frame signal<br/>(plugin-level)")]
         AnimTick[setInterval 300ms<br/>frame++ gated by energy]
         RefreshTick[setInterval 1500ms<br/>mtime poll]
+        IdleTimer[setInterval 60s<br/>idle-recovery]
+        Hooks["event hooks (10+)<br/>prompted / tool.called /<br/>tool.success / tool.failed /<br/>todo / file.edited / perm /<br/>shell / branch / compacted /<br/>idle / error"]
+        TurnAccum[(("turnAccum<br/>per-session memory<br/>xp · tools · failures ·<br/>streak · toolCounts")) ]
         SlashCmds["slash commands<br/>feed / play / rest /<br/>status / rename / switch"]
 
         TUIEntry --> FrameSignal
         TUIEntry --> View
         TUIEntry --> SlashCmds
+        TUIEntry --> Hooks
+        TUIEntry --> IdleTimer
         FrameSignal --> AnimTick
         View --> RefreshTick
+        Hooks <--> TurnAccum
     end
 
     subgraph State["Persistent state"]
         StateFile[("~/.config/<br/>opencode-buddy/<br/>state.json")]
-    end
-
-    subgraph OpencodeServer["opencode server (same process)"]
-        Bus{{"event bus"}}
-        Sessions[Session events<br/>session.idle<br/>session.error]
     end
 
     U -->|types| Prompt
@@ -178,26 +215,30 @@ flowchart LR
     View -->|render frame| Sidebar
     View -->|reads mtime| StateFile
     RefreshTick -->|state changed| View
-    Bus -->|session.idle| View
-    Bus -->|session.error| View
-    View -->|write derived state| StateFile
+    Bus -->|10+ event types| Hooks
+    Hooks -->|mutate| StateFile
+    Hooks -->|Level up! / Turn complete toast| U
+    IdleTimer -->|+5 energy after 5min| StateFile
     AnimTick -->|reads energy| StateFile
 
     classDef store fill:#1e293b,stroke:#64748b,color:#f1f5f9
-    class StateFile store
+    class StateFile,TurnAccum store
 ```
 
 ### Boot flow
 
 1. opencode reads `~/.config/opencode/tui.json` and discovers the buddy entry under `plugin`.
 2. The TUI runtime loads `tui-plugin.jsx` from `opencode-buddy` (via `exports["./tui"]` in `package.json`).
-3. The `tui(api)` function runs once. It does three things:
-   - Sets up a **plugin-level frame signal** and a `setInterval` (300 ms) that ticks it. The frame signal is passed into the View as a prop, so the View is purely a consumer — its own lifecycle does not own the timer. This means slot re-renders cannot freeze the animation.
-   - Registers the `sidebar_content` slot. The slot renderer is cached on first call so the View instance is reused across re-renders.
-   - Registers 6 slash commands on the keymap.
-4. The TUI's `<Slot name="sidebar_content" />` (in the sidebar component) resolves to the buddy's cached `View`. The View reads the frame signal and re-renders the buddy art on every tick.
-5. The View also runs a 1500 ms timer that polls `state.json` mtime. When the file changes, the View reloads and re-renders. Slash commands write to `state.json` directly, so the next poll picks up the change.
-6. The `setInterval` for the frame signal also reads `state.json` each tick. If the buddy is `sleeping` or has energy < 20, the frame does not advance — the animation visually pauses while the buddy rests.
+3. The `tui(api)` function runs once. It sets up:
+   - A **plugin-level frame signal** + `setInterval` (300 ms) that ticks it. The View is passed the signal as a prop, so slot re-renders cannot freeze the animation.
+   - The `sidebar_content` slot. The slot renderer is cached on first call so the View instance is reused across re-renders.
+   - 6 **slash commands** on the keymap.
+   - 10+ **event hooks** on the session bus (prompted, tool.called/success/failed, todo, file.edited, permission.replied, shell.ended, vcs.branch.updated, session.compacted, session.idle, session.error). Each hook mutates `state.json` and/or updates an in-memory `turnAccum`.
+   - A 60-second **idle-recovery timer** that grants `+5 energy` once after 5 min of no prompt activity.
+4. The TUI's `<Slot name="sidebar_content" />` resolves to the buddy's cached `View`. The View reads the frame signal and re-renders the buddy art on every tick.
+5. The View also runs a 1500 ms timer that polls `state.json` mtime. When the file changes (slash command or event hook wrote to it), the View reloads and re-renders.
+6. The animation timer reads `state.json` each tick. If the buddy is `sleeping` or has energy < 20, the frame does not advance — the animation visually pauses while the buddy rests.
+7. On `session.idle`, the event hook settles the turn atomically: load → apply `onTurnDone(state, accumXp, stats)` → save. If a level-up happened, a `Level up!` toast surfaces; otherwise `Turn complete +N xp from M tool calls`.
 
 ### Why two config files with the same spec?
 
@@ -206,7 +247,7 @@ opencode has separate plugin registries for the **server** (LLM tools, file watc
 - `opencode.json` → `kind: "server"` → loads `src/server-plugin.js` via `main` (no-op since 0.3.x)
 - `tui.json` → `kind: "tui"` → loads `src/tui-plugin.jsx` via `exports["./tui"]`
 
-Slash commands update state instantly without round-tripping through the LLM, which is the right UX for "I want to feed my pet right now" interactions.
+Slash commands and event hooks update state instantly without round-tripping through the LLM, which is the right UX for both "I want to feed my pet right now" interactions and "the LLM just finished a turn, react now" reactions.
 
 ## Project layout
 
@@ -218,10 +259,14 @@ opencode-buddy/
 ├── scripts/
 │   └── postinstall.mjs     # auto-registers plugin in opencode.json + tui.json
 └── src/
-    ├── tui-plugin.jsx     # TUI plugin: slot + slash commands + frame timer
+    ├── tui-plugin.jsx     # TUI plugin: slot + slash commands + 10+ event hooks + idle-recovery timer
     ├── server-plugin.js   # Server plugin: no-op (LLM tool removed in 0.3.x)
     ├── species.js         # ASCII art + per-species palettes + 3-frame idle loop
-    ├── state.js           # state machine: tick, feed, play, rest, rename, switchSpecies, deriveState
+    ├── state.js           # state machine: tick (night/sleep aware), feed, play, rest,
+    │                      #   plus event-driven mutators (onPromptStart, onToolSuccess,
+    │                      #   onToolFailure, onTurnDone, onTodoCompleted, onFileEdited,
+    │                      #   onPermissionAllowed, onShellSuccess, onBranchUpdated,
+    │                      #   onCompacted, onIdleRecovery, onStreak), maybeLevelUp
     └── persistence.js     # atomic read/write of state.json
 ```
 
