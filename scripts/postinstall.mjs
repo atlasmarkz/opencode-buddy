@@ -12,7 +12,7 @@ import { promises as fs } from "node:fs"
 import path from "node:path"
 import os from "node:os"
 
-const PLUGIN_SPEC = "opencode-buddy"
+const PLUGIN_SPEC = "@mark_future_ai/opencode-buddy"
 const CONFIG_DIR = path.join(os.homedir(), ".config", "opencode")
 const SERVER_CONFIG = path.join(CONFIG_DIR, "opencode.json")
 

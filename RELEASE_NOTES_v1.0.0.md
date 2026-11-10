@@ -1,4 +1,4 @@
-# opencode-buddy v1.0.0
+# @mark_future_ai/opencode-buddy v1.0.0
 
 ## What's in this release
 
@@ -8,7 +8,7 @@ opencode-buddy now uses the **OpenCode 2 plugin API** (`@opencode/plugin` 2.2.6+
 
 - **Requires OpenCode 2.2.6+**, including OpenCode Desktop 2.2.6+.
 - The plugin is registered under `plugins` in `~/.config/opencode/opencode.json`. The old `tui.json` entry and the V1 `plugin` key are no longer used.
-- `npm install -g opencode-buddy` still registers the plugin automatically. Upgrading users should remove the old `plugin` entry from `opencode.json` and the entry from `tui.json`.
+- `npm install -g @mark_future_ai/opencode-buddy` still registers the plugin automatically. Upgrading users should remove the old `plugin` entry from `opencode.json` and the entry from `tui.json`.
 - Node 18+ is unchanged.
 
 ## Migration details
@@ -26,7 +26,7 @@ opencode-buddy now uses the **OpenCode 2 plugin API** (`@opencode/plugin` 2.2.6+
 ## Install
 
 ```bash
-npm install -g opencode-buddy
+npm install -g @mark_future_ai/opencode-buddy
 ```
 
 The buddy appears in the sidebar on the next OpenCode start.

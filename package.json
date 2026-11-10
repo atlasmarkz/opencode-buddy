@@ -1,5 +1,5 @@
 {
-  "name": "opencode-buddy",
+  "name": "@mark_future_ai/opencode-buddy",
   "version": "1.0.0",
   "description": "A virtual ASCII pet companion that lives in the opencode TUI sidebar. Hatches, feeds, plays, and reacts to what you're coding.",
   "type": "module",

@@ -35,7 +35,7 @@ Since v0.6.0 the buddy is **per-session**: each opencode session has its own sta
 Requires OpenCode 2 (`@opencode/plugin` 2.2.6+), including OpenCode Desktop 2.2.6+.
 
 ```bash
-npm install -g opencode-buddy
+npm install -g @mark_future_ai/opencode-buddy
 ```
 
 The `postinstall` script automatically registers the plugin in your global config:
@@ -47,13 +47,13 @@ The `postinstall` is JSONC-safe — it leaves any file that contains comments al
 ```jsonc
 // ~/.config/opencode/opencode.json
 {
-  "plugins": ["opencode-buddy"]
+  "plugins": ["@mark_future_ai/opencode-buddy"]
 }
 ```
 
 Restart opencode. The buddy appears in the sidebar.
 
-> Upgrading from 0.6.x? opencode-buddy 1.0 moves to the OpenCode 2 plugin API and no longer runs on OpenCode 1. Remove the old `plugin` entry from `opencode.json` and the `plugin` entry from `tui.json`; `npm install -g opencode-buddy` adds the V2 `plugins` entry for you.
+> Upgrading from 0.6.x? opencode-buddy 1.0 moves to the OpenCode 2 plugin API and no longer runs on OpenCode 1. Remove the old `plugin` entry from `opencode.json` and the `plugin` entry from `tui.json`; `npm install -g @mark_future_ai/opencode-buddy` adds the V2 `plugins` entry for you.
 
 ## Usage
 
@@ -174,7 +174,7 @@ flowchart LR
 
     subgraph OpencodeTUI["opencode TUI process (binary)"]
         direction TB
-        Config[("opencode.json<br/>plugins: [opencode-buddy]")]
+        Config[("opencode.json<br/>plugins: [@mark_future_ai/opencode-buddy]")]
         Runtime[TuiPluginRuntime]
         Sidebar[Sidebar component]
         Prompt[Prompt component]
@@ -299,10 +299,10 @@ State lives at `~/.config/opencode-buddy/sessions/<sessionID>.json` (one file pe
 ## Uninstall
 
 ```bash
-npm uninstall -g opencode-buddy
+npm uninstall -g @mark_future_ai/opencode-buddy
 ```
 
-Then remove `"opencode-buddy"` from the `plugins` array in `opencode.json` (the npm uninstall does not auto-edit user config).
+Then remove `"@mark_future_ai/opencode-buddy"` from the `plugins` array in `opencode.json` (the npm uninstall does not auto-edit user config).
 
 ## License
 
