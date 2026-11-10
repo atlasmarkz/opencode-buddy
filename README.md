@@ -26,6 +26,8 @@ A virtual pet companion for opencode. In the TUI it lives in the sidebar as ASCI
 └──────────────────────────┘
 ```
 
+The GIF and diagram above show the **TUI form**. In OpenCode Desktop the same buddy is a floating, draggable SVG pet; see [Desktop floating pet](#desktop-floating-pet).
+
 Since v0.5.0 the buddy is **work-driven**: xp comes from the LLM calling tools, finishing turns, and you approving permissions — not from slash commands. Slash commands stay around for "I want to feed my pet right now" interactions. The buddy gets tired when you push it hard, naps to recover when you walk away, and slows down late at night.
 
 Since v0.6.0 the buddy is **per-session**: each opencode session has its own state file at `~/.config/opencode-buddy/sessions/<sessionID>.json`, so multiple windows and projects never share or fight over a buddy. Sessions idle for 14+ days are automatically deleted by a daily LRU sweep.
@@ -59,6 +61,8 @@ Restart opencode. The buddy appears in the TUI sidebar and, in OpenCode Desktop,
 
 ### Desktop floating pet
 
+![Desktop floating pet with the stats card and action menu](assets/buddy-desktop.png)
+
 In OpenCode Desktop the buddy floats over the window:
 
 - **Drag** anywhere; the position is remembered.
@@ -66,6 +70,8 @@ In OpenCode Desktop the buddy floats over the window:
 - **Right-click** to feed, play, rest, rename, or switch pets.
 - **Hide** from the right-click menu; bring it back with the command palette (`Cmd+K` / `Ctrl+K`) → **Toggle floating pet**.
 - **Built-in** lists the six SVG presets. **Pets** lists custom packs installed on disk.
+
+The same actions are available from the command palette: **Feed buddy**, **Play with buddy**, **Let buddy rest**, **Show buddy stats**, and **Toggle floating pet**.
 
 The TUI sidebar keeps working at the same time. Custom packs are Desktop-only; the TUI keeps rendering the built-in ASCII species.
 
@@ -87,7 +93,7 @@ Type `/` in the prompt to see the slash commands. The buddy ships with seven:
 
 ### Automatic reactions (work-driven xp & rewards)
 
-The buddy listens to opencode's live session events. Every event tweaks the buddy's stats so the sidebar actually drifts in response to what you're doing:
+The server part listens to opencode's live session events. Every event tweaks the buddy's stats, so the TUI sidebar and the Desktop pet both drift in response to what you're doing:
 
 | Trigger | Effect |
 | --- | --- |
@@ -128,15 +134,18 @@ State lives in `~/.config/opencode-buddy/sessions/<sessionID>.json` — one file
 
 ```
 ~/.config/opencode-buddy/
-└── sessions/                      # active buddies
-    ├── __default__.json           # fallback for LLM tool calls with no session arg
-    ├── abc-123.json               # session "abc-123"
-    └── def-456.json               # session "def-456"
+├── sessions/                      # active buddies
+│   ├── __default__.json           # fallback for LLM tool calls with no session arg
+│   ├── abc-123.json               # session "abc-123"
+│   └── def-456.json               # session "def-456"
+├── pets.json                      # Desktop prefs: active pack + visible
+└── pets/                          # installed OpenCode pet packs
+    └── <id>/pet.json + spritesheet
 ```
 
 - One file per opencode session. `1000 active sessions ≈ 500 KB`.
 - `__default__` is a synthetic session used when no real opencode session is in scope (e.g. the LLM tool without a `session` argument). Upgrades from v0.4/v0.5 transparently migrate the legacy global `state.json` into `sessions/__default__.json` on first read.
-- A background timer runs at plugin boot and once a day, **deleting** any session file whose `idleAt` is older than 14 days. The buddy is gone for good — no archive folder to clean up later.
+- The server part starts a background timer at boot and once a day, **deleting** any session file whose `idleAt` is older than 14 days. The buddy is gone for good — no archive folder to clean up later.
 - `/buddy-list` shows the active roster; the current session's buddy is marked with `→`.
 
 ### What you see in the sidebar
@@ -177,7 +186,7 @@ The spritesheet is an 8×9 atlas of 192×208 px cells (1536×1872 px total). Row
 
 Right-click the pet → **Pets** → choose a pack. **Built-in** switches back to a preset. The buddy's hunger, happiness, energy, and xp stay per-session; the pack only changes the Desktop appearance.
 
-## Six species
+## Built-in pets
 
 ```
         duck                    cat                  dragon
@@ -197,137 +206,113 @@ Right-click the pet → **Pets** → choose a pack. **Built-in** switches back t
      ~ ambien              beep                   boo
 ```
 
+These six are the built-in presets. The names are suggestions shown in the Desktop pet picker; the buddy's actual name is yours to change with `/buddy-rename`.
+
+| Preset | Species |
+| --- | --- |
+| Quack | duck |
+| Miso | cat |
+| Ember | dragon |
+| Lumi | axolotl |
+| Bolt | robot |
+| Boo | ghost |
+
 Each species has a per-character color palette. The idle state has 3 frames; `frameCount` is exposed so the View can pick a frame to render. The buddy renders whatever frame `frame() % fc()` returns at the moment of re-render.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    subgraph User
-        U[Opencode TUI user]
+    Config[("opencode.json<br/>plugins: [@mark_future_ai/opencode-buddy]")]
+
+    subgraph Server["Server part (src/server-plugin.js)"]
+        Tool["buddy tool"]
+        Progress["runProgression<br/>ctx.event.subscribe()"]
+        Accum["turnAccum<br/>xp · tools · failures · streak"]
+        Progress <--> Accum
     end
 
-    subgraph OpencodeTUI["opencode TUI process (binary)"]
-        direction TB
-        Config[("opencode.json<br/>plugins: [@mark_future_ai/opencode-buddy]")]
-        Runtime[TuiPluginRuntime]
-        Sidebar[Sidebar component]
-        Prompt[Prompt component]
-        Slots{{"slot registry<br/>sidebar.content"}}
-        Keymap{{"keymap<br/>(slash commands)"}}
-        Bus{{"event stream<br/>(execution/tool/file/<br/>perm/shell/vcs/...)"}}
-
-        Config --> Runtime
-        Runtime --> Slots
-        Runtime --> Keymap
-        Slots --> Sidebar
-        Keymap --> Prompt
+    subgraph TUI["TUI part (src/tui-plugin.jsx)"]
+        Slots["sidebar.content slot"]
+        Slash["7 slash commands"]
+        View["View<br/>ASCII frames"]
+        Poll["mtime poll 1.5s"]
+        View --> Poll
     end
 
-    subgraph Buddy["opencode-buddy plugin (jsx)"]
-        direction TB
-        TUIEntry["tui part<br/>(id: opencode-buddy.tui)"]
-        View[View component<br/>SolidJS]
-        FrameSignal[("frame signal<br/>(plugin-level)")]
-        AnimTick[setInterval 300ms<br/>frame++ gated by energy]
-        RefreshTick[setInterval 1500ms<br/>mtime poll]
-        IdleTimer[setInterval 60s<br/>idle-recovery]
-        Hooks["event subscriptions (10+)<br/>execution.started / tool.input /<br/>tool.success / tool.failed /<br/>filesystem.changed / permission /<br/>shell / branch / compaction /<br/>execution.succeeded / failed"]
-        TurnAccum[("turnAccum<br/>per-session memory<br/>xp · tools · failures ·<br/>streak · toolCounts")]
-        SlashCmds["slash commands<br/>feed / play / rest /<br/>status / rename / switch"]
-
-        TUIEntry --> FrameSignal
-        TUIEntry --> View
-        TUIEntry --> SlashCmds
-        TUIEntry --> Hooks
-        TUIEntry --> IdleTimer
-        FrameSignal --> AnimTick
-        View --> RefreshTick
-        Hooks <--> TurnAccum
+    subgraph Desktop["Desktop GUI part (src/gui.tsx + src/gui-main.js)"]
+        Overlay["window.bottom slot<br/>Portal overlay"]
+        Art["SVG pet / Codex sprite"]
+        Menu["drag · stats · menu"]
+        Ipc["Ipc<br/>session state + pet prefs"]
+        Overlay --> Art
+        Overlay --> Menu
+        Menu --> Ipc
     end
 
-    subgraph State["Persistent state (per session)"]
-        direction TB
-        StateRoot["~/.config/<br/>opencode-buddy/"]
-        SessionsDir["sessions/"]
-        Default[("__default__.json")]
-        Sess1[("abc-123.json")]
-        Sess2[("def-456.json")]
-
-        StateRoot --> SessionsDir
-        SessionsDir --> Default
-        SessionsDir --> Sess1
-        SessionsDir --> Sess2
+    subgraph Disk["~/.config/opencode-buddy"]
+        Sessions["sessions/<sessionID>.json"]
+        Prefs["pets.json<br/>active pack · visible"]
+        Packs["pets/<id>/"]
+        CodexPets["~/.codex/pets/<id>/"]
     end
 
-    U -->|types| Prompt
-    Prompt -->|/buddy-feed etc| Keymap
-    Keymap --> SlashCmds
-    SlashCmds -->|"read+write per session"| SessionsDir
-    SlashCmds -->|toast feedback| U
-
-    Slots -->|invokes renderer| View
-    View -->|render frame| Sidebar
-    View -->|"reads mtime per session"| SessionsDir
-    RefreshTick -->|state changed| View
-    Bus -->|10+ event types| Hooks
-    Hooks -->|"mutate per session"| SessionsDir
-    Hooks -->|Level up! / Turn complete toast| U
-    IdleTimer -->|"+5 energy per session"| SessionsDir
-    AnimTick -->|"reads energy per session"| SessionsDir
-
-    classDef store fill:#1e293b,stroke:#64748b,color:#f1f5f9
-    class Default,Sess1,Sess2,TurnAccum store
+    Config --> Tool
+    Config --> Slots
+    Config --> Overlay
+    Tool --> Sessions
+    Progress --> Sessions
+    View --> Sessions
+    Ipc --> Sessions
+    Ipc --> Prefs
+    Ipc --> Packs
+    Ipc --> CodexPets
 ```
 
 ### Boot flow
 
 1. opencode reads `~/.config/opencode/opencode.json` and discovers the buddy entry under `plugins`.
-2. The plugin runtime loads the server part (`.` → `src/server-plugin.js`) and the TUI part (`./tui` → `src/tui-plugin.jsx`) from the same package entry.
-3. The TUI part's `setup(context)` runs once. It sets up:
-   - A **plugin-level frame signal** + `setInterval` (300 ms) that ticks it. The View is passed the signal as a prop, so slot re-renders cannot freeze the animation.
-   - The `sidebar.content` slot.
-   - 7 **slash commands** on the keymap layer (including `/buddy-list`).
-   - 10+ **event subscriptions** on the OpenCode event stream (`session.execution.started`, `session.tool.input.started`, `session.tool.success/failed`, `filesystem.changed`, `permission.replied`, `session.shell.ended`, `vcs.branch.updated`, `session.compaction.ended`, `session.execution.succeeded/failed`). Each handler resolves the target `sessionID` from the event (or `lastActiveSessionID` for events that don't carry one) and mutates that session's file in `sessions/`, updating the in-memory `turnAccum` along the way.
-   - A 60-second **idle-recovery timer** that iterates all sessions in `sessions/` and grants `+5 energy` to any whose `lastPromptAt` is older than 5 min.
-   - A daily **LRU sweep** that deletes session files whose `idleAt` is older than 14 days.
-4. The TUI's sidebar slot resolves to the buddy's `View`. The View reads the frame signal and re-renders the buddy art on every tick.
-5. The View also runs a 1500 ms timer that polls its **own session's** file mtime. When the file changes (slash command or event handler wrote to it), the View reloads and re-renders.
-6. The animation timer advances unconditionally; per-session `sleeping` buddies just render the same static frame on every tick (cheap; the `renderFrame` is pure).
-7. On `session.execution.succeeded`, the event handler settles the turn atomically for that session: load → apply `onTurnDone(state, accumXp, stats)` → save. If a level-up happened, a `Level up!` toast surfaces; otherwise `Turn complete +N xp from M tool calls`.
+2. The server part (`.` → `src/server-plugin.js`) loads once per server. It registers the `buddy` tool and starts `ctx.event.subscribe()`, which owns turn accumulation, idle recovery, and the daily LRU sweep. All progression writes go to the per-session files.
+3. The TUI part (`./tui` → `src/tui-plugin.jsx`) loads in the terminal client. It adds the `sidebar.content` slot, the seven slash commands, the 300 ms frame timer, and a 1500 ms mtime poll. It does **not** subscribe to events; the server already did.
+4. The Desktop part (`./gui-experimental` → `dist/gui-experimental.cjs`) loads in every Desktop window. `setup()` adds the `window.bottom` slot and a `<Portal>` overlay, the palette commands, and a 1500 ms poll through IPC. `main()` runs once in Electron main and provides the IPC methods that read/write session files, pet prefs, and pack sprites.
+5. The TUI and Desktop read the same `sessions/<sessionID>.json` files, so a buddy fed in one form is fed in the other.
+6. On `session.execution.succeeded` the server settles the turn atomically (load → `onTurnDone` → save). The TUI notices the level change on its next mtime poll and toasts `Level up!`; the Desktop pet updates on its next poll.
 
-### How one entry loads both parts
+### How one entry loads all parts
 
-A V2 plugin package exports its parts from one `package.json`; the `plugins` entry loads all of them:
+A V2 plugin package exports its parts from one `package.json`; the same `plugins` entry loads all of them:
 
-- `.` → `src/server-plugin.js` (server part: the `buddy` LLM tool)
-- `./tui` → `src/tui-plugin.jsx` (TUI part: sidebar slot, slash commands, keymap)
+- `.` → `src/server-plugin.js` (server part: `buddy` tool + event progression)
+- `./tui` → `src/tui-plugin.jsx` (TUI part: sidebar, slash commands, frame timer)
+- `./gui-experimental` → `dist/gui-experimental.cjs` (Desktop part: floating pet; prebuilt CJS, built by `npm run build:gui`)
 
-The TUI loads the TUI part of every plugin its server loads, so there is no second config file to keep in sync.
+The TUI loads the TUI part of every plugin its server loads; Desktop loads the GUI part. There is no second config file to keep in sync.
 
-Slash commands and event subscriptions update state instantly without round-tripping through the LLM, which is the right UX for both "I want to feed my pet right now" interactions and "the LLM just finished a turn, react now" reactions.
+Slash commands and server-side event handlers update state instantly without round-tripping through the LLM.
 
 ## Project layout
 
 ```
 opencode-buddy/
 ├── package.json
-├── README.md
-├── LICENSE
+├── vite.config.ts          # builds dist/gui-experimental.cjs
 ├── scripts/
-│   └── postinstall.mjs     # auto-registers plugin in opencode.json (V2 `plugins`)
+│   └── postinstall.mjs     # registers the plugin in opencode.json (V2 `plugins`)
+├── dist/
+│   └── gui-experimental.cjs # built Desktop GUI bundle (prepack)
 └── src/
-    ├── tui-plugin.jsx     # TUI part: per-session slot + 7 slash commands + 10+ event subscriptions
-    │                      #   + idle-recovery timer + daily LRU sweep
-    ├── server-plugin.js   # Server part: LLM tool (accepts session arg) + action=list
-    ├── species.js         # ASCII art + per-species palettes + 3-frame idle loop
-    ├── state.js           # state machine: tick (night/sleep aware), feed, play, rest,
-    │                      #   plus event-driven mutators (onPromptStart, onToolSuccess,
-    │                      #   onToolFailure, onTurnDone, onTodoCompleted, onFileEdited,
-    │                      #   onPermissionAllowed, onShellSuccess, onBranchUpdated,
-    │                      #   onCompacted, onIdleRecovery, onStreak), maybeLevelUp
-    └── persistence.js     # per-session load/save/mtime + sweep + listSessions + legacy migration
+    ├── server-plugin.js    # server: buddy tool + event progression + idle/sweep
+    ├── tui-plugin.jsx      # TUI: sidebar slot + 7 slash commands + frame timer/poll
+    ├── gui.tsx             # Desktop: floating SVG/sprite pet, menu, palette commands
+    ├── gui-main.js         # Desktop main: IPC state/pets provider
+    ├── gui.css             # Desktop pet styles/animations
+    ├── buddy-ipc.js        # shared Ipc contract (no Node imports)
+    ├── pets.js             # Codex/local pet pack discovery, validation, prefs
+    ├── species.js          # ASCII art + per-species palettes + idle loop
+    ├── state.js            # state machine + event-driven mutators
+    └── persistence.js      # per-session load/save/mtime + sweep + listSessions
 ```
+
 
 State lives at `~/.config/opencode-buddy/sessions/<sessionID>.json` (one file per opencode session, plus a `__default__` synthetic session for LLM tool calls outside a session). `~/.config` resolves via `os.homedir()` so it works on Linux, macOS, and Windows.
 
@@ -338,6 +323,8 @@ npm uninstall -g @mark_future_ai/opencode-buddy
 ```
 
 Then remove `"@mark_future_ai/opencode-buddy"` from the `plugins` array in `opencode.json` (the npm uninstall does not auto-edit user config).
+
+Per-session buddies and pet preferences stay in `~/.config/opencode-buddy/`; delete that folder to remove them. `~/.codex/pets/` is never modified.
 
 ## License
 
