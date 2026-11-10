@@ -69,6 +69,12 @@ export async function load(sessionID) {
     return JSON.parse(raw);
   } catch (err) {
     if (err.code === "ENOENT") return null;
+    // A truncated or otherwise corrupt save would otherwise break every
+    // call. Keep the bytes for diagnosis and start fresh.
+    if (err instanceof SyntaxError) {
+      await fs.rename(fp, fp + ".corrupt").catch(() => {});
+      return null;
+    }
     throw err;
   }
 }

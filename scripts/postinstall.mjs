@@ -1,13 +1,12 @@
 #!/usr/bin/env node
-// Postinstall: register the buddy plugin in opencode config files so the user
+// Postinstall: register the buddy plugin in opencode's V2 config so the user
 // only needs to run `npm install -g opencode-buddy` and restart opencode.
 //
-// We touch two files:
-//   - ~/.config/opencode/opencode.json   (server plugin)
-//   - ~/.config/opencode/tui.json        (TUI plugin, created if missing)
+// We touch one file: ~/.config/opencode/opencode.json (both the server and
+// TUI parts load from the same `plugins` entry).
 //
 // We are idempotent: if the entry is already present, we leave it alone.
-// We never overwrite a user's existing config — we only add the `plugin` key.
+// We never overwrite a user's existing config — we only add the `plugins` key.
 
 import { promises as fs } from "node:fs"
 import path from "node:path"
@@ -16,7 +15,6 @@ import os from "node:os"
 const PLUGIN_SPEC = "opencode-buddy"
 const CONFIG_DIR = path.join(os.homedir(), ".config", "opencode")
 const SERVER_CONFIG = path.join(CONFIG_DIR, "opencode.json")
-const TUI_CONFIG = path.join(CONFIG_DIR, "tui.json")
 
 async function readJSON(filepath) {
   try {
@@ -35,76 +33,30 @@ function hasComments(raw) {
 
 function ensurePluginArray(data, spec) {
   if (!data || typeof data !== "object") return false
-  const list = Array.isArray(data.plugin) ? data.plugin : []
-  if (list.some((entry) => typeof entry === "string" && entry === spec)) return false
+  const list = Array.isArray(data.plugins) ? data.plugins : []
+  if (list.some((entry) => entry === spec)) return false
   list.push(spec)
-  data.plugin = list
+  data.plugins = list
   return true
 }
 
-async function updateConfig({ filepath, spec, fallback, mergeTopLevel }) {
-  let existing = await readJSON(filepath)
+async function main() {
+  const existing = await readJSON(SERVER_CONFIG)
 
   if (existing && hasComments(existing.raw)) {
     // Don't touch JSONC files with comments — we'd strip them.
-    return { changed: false, created: false, skipped: true }
+    return
   }
 
-  let data
-  let isNew
+  const isNew = !existing
+  const data = isNew ? { $schema: "https://opencode.ai/config.json" } : existing.data
 
-  if (!existing) {
-    data = { ...fallback }
-    isNew = true
-  } else {
-    data = existing.data
-    isNew = false
-  }
+  const changed = ensurePluginArray(data, PLUGIN_SPEC)
+  if (!changed && !isNew) return
 
-  if (mergeTopLevel) {
-    Object.assign(data, mergeTopLevel)
-  }
-
-  const changed = ensurePluginArray(data, spec)
-  if (!changed && !isNew) {
-    return { changed: false, created: false }
-  }
-
-  await fs.mkdir(path.dirname(filepath), { recursive: true })
-  const json = JSON.stringify(data, null, 2) + "\n"
-  await fs.writeFile(filepath, json)
-
-  if (isNew) return { changed: true, created: true }
-  return { changed: true, created: false }
-}
-
-async function main() {
-  const results = []
-
-  results.push({
-    file: SERVER_CONFIG,
-    ...(await updateConfig({
-      filepath: SERVER_CONFIG,
-      spec: PLUGIN_SPEC,
-      fallback: { $schema: "https://opencode.ai/config.json" },
-    })),
-  })
-
-  results.push({
-    file: TUI_CONFIG,
-    ...(await updateConfig({
-      filepath: TUI_CONFIG,
-      spec: PLUGIN_SPEC,
-      fallback: { $schema: "https://opencode.ai/tui.json" },
-    })),
-  })
-
-  for (const r of results) {
-    if (r.changed) {
-      const action = r.created ? "created" : "updated"
-      console.log(`[opencode-buddy] ${action} ${r.file}`)
-    }
-  }
+  await fs.mkdir(path.dirname(SERVER_CONFIG), { recursive: true })
+  await fs.writeFile(SERVER_CONFIG, JSON.stringify(data, null, 2) + "\n")
+  console.log(`[opencode-buddy] ${isNew ? "created" : "updated"} ${SERVER_CONFIG}`)
 }
 
 main().catch((err) => {

@@ -28,39 +28,32 @@ A virtual ASCII pet companion that lives in the opencode TUI sidebar. **One budd
 
 Since v0.5.0 the buddy is **work-driven**: xp comes from the LLM calling tools, finishing turns, and you approving permissions — not from slash commands. Slash commands stay around for "I want to feed my pet right now" interactions. The buddy gets tired when you push it hard, naps to recover when you walk away, and slows down late at night.
 
-Since v0.6.0 the buddy is **per-session**: each opencode session has its own state file at `~/.config/opencode-buddy/sessions/<sessionID>.json`, so multiple windows and projects never share or fight over a buddy. Sessions idle for 30+ days are automatically deleted by a daily LRU sweep.
+Since v0.6.0 the buddy is **per-session**: each opencode session has its own state file at `~/.config/opencode-buddy/sessions/<sessionID>.json`, so multiple windows and projects never share or fight over a buddy. Sessions idle for 14+ days are automatically deleted by a daily LRU sweep.
 
 ## Install
 
-Requires opencode ≥ 1.15.
+Requires OpenCode 2 (`@opencode/plugin` 2.2.6+), including OpenCode Desktop 2.2.6+.
 
 ```bash
 npm install -g opencode-buddy
 ```
 
-The `postinstall` script automatically registers the plugin in both config files using the same spec. opencode picks the right entrypoint from the package's `exports` field based on runtime kind:
+The `postinstall` script automatically registers the plugin in your global config:
 
-- `opencode.json` (kind: `server`) → `src/server-plugin.js` via `main` (no-op since 0.3.x)
-- `tui.json` (kind: `tui`) → `src/tui-plugin.jsx` via `exports["./tui"]`
+- `opencode.json` → [`plugins`](https://opencode.ai/docs/config) entry; OpenCode loads both the server part (`.` → `src/server-plugin.js`) and the TUI part (`./tui` → `src/tui-plugin.jsx`) from it.
 
-Both `~/.config/opencode/opencode.json` and `~/.config/opencode/tui.json` get the same `plugin: ["opencode-buddy"]` entry. The `postinstall` is JSONC-safe — it leaves any file that contains comments alone and asks you to add the entry manually:
+The `postinstall` is JSONC-safe — it leaves any file that contains comments alone and asks you to add the entry manually:
 
 ```jsonc
 // ~/.config/opencode/opencode.json
 {
-  "plugin": ["opencode-buddy"]
-}
-```
-
-```jsonc
-// ~/.config/opencode/tui.json
-{
-  "$schema": "https://opencode.ai/tui.json",
-  "plugin": ["opencode-buddy"]
+  "plugins": ["opencode-buddy"]
 }
 ```
 
 Restart opencode. The buddy appears in the sidebar.
+
+> Upgrading from 0.6.x? opencode-buddy 1.0 moves to the OpenCode 2 plugin API and no longer runs on OpenCode 1. Remove the old `plugin` entry from `opencode.json` and the `plugin` entry from `tui.json`; `npm install -g opencode-buddy` adds the V2 `plugins` entry for you.
 
 ## Usage
 
@@ -78,7 +71,7 @@ Type `/` in the prompt to see the slash commands. The buddy ships with seven:
 | `/buddy-rename` | Open a prompt to rename the buddy (max 20 chars) |
 | `/buddy-switch` | Open a picker to switch to duck, cat, dragon, axolotl, robot, or ghost |
 
-`/buddy-play` only gives +1 xp — meaningful xp comes from coding (see below). All slash commands except `/buddy-list` target the **current** opencode session's buddy (read from `api.route.current.params.sessionID`).
+`/buddy-play` only gives +1 xp — meaningful xp comes from coding (see below). All slash commands except `/buddy-list` target the **current** opencode session's buddy (read from the active TUI route).
 
 ### Automatic reactions (work-driven xp & rewards)
 
@@ -91,14 +84,13 @@ The buddy listens to opencode's live session events. Every event tweaks the budd
 | 3 consecutive tool successes (no failure) | +5 xp streak bonus |
 | Same tool used >5 times in one turn | xp halved for that tool (anti-grind) |
 | Tool call fails | -1 happy, -0.5 energy, streak reset; 2+ fails → `scared` |
-| Todo marked completed | +5 xp per item |
-| File edited (`file.edited`) | +1 hunger (30s global throttle) |
+| File edited (`filesystem.changed`) | +1 hunger (30s global throttle) |
 | Shell command finished | +1 hunger, +1 energy |
 | Permission granted (once/always) | +3 hunger, +1 happy |
 | Git branch switched | +3 hunger, +1 happy |
 | Session history compacted | +10 energy, +2 happy |
 | Idle >5 min without a prompt | +5 energy (5 min cooldown) |
-| **Turn finished (`session.idle`)** | +10 base xp + accumulated (cap 30/turn), 3s `celebrating`, toast `Turn complete +N xp` or `Level up!` |
+| **Turn finished (`session.execution.succeeded`)** | +10 base xp + accumulated (cap 30/turn), 3s `celebrating`, toast `Turn complete +N xp` or `Level up!` |
 | Session error | 5s `scared` |
 | **Level up** | +5 hunger, +3 energy, +3 happy |
 
@@ -182,13 +174,13 @@ flowchart LR
 
     subgraph OpencodeTUI["opencode TUI process (binary)"]
         direction TB
-        Config[("tui.json<br/>plugin: [opencode-buddy]")]
+        Config[("opencode.json<br/>plugins: [opencode-buddy]")]
         Runtime[TuiPluginRuntime]
         Sidebar[Sidebar component]
         Prompt[Prompt component]
-        Slots{{"slot registry<br/>sidebar_content"}}
+        Slots{{"slot registry<br/>sidebar.content"}}
         Keymap{{"keymap<br/>(slash commands)"}}
-        Bus{{"event bus<br/>(session/tool/file/<br/>perm/todo/vcs/...)"}}
+        Bus{{"event stream<br/>(execution/tool/file/<br/>perm/shell/vcs/...)"}}
 
         Config --> Runtime
         Runtime --> Slots
@@ -199,13 +191,13 @@ flowchart LR
 
     subgraph Buddy["opencode-buddy plugin (jsx)"]
         direction TB
-        TUIEntry["tui entry<br/>(id: opencode-buddy)"]
+        TUIEntry["tui part<br/>(id: opencode-buddy.tui)"]
         View[View component<br/>SolidJS]
         FrameSignal[("frame signal<br/>(plugin-level)")]
         AnimTick[setInterval 300ms<br/>frame++ gated by energy]
         RefreshTick[setInterval 1500ms<br/>mtime poll]
         IdleTimer[setInterval 60s<br/>idle-recovery]
-        Hooks["event hooks (10+)<br/>prompted / tool.called /<br/>tool.success / tool.failed /<br/>todo / file.edited / perm /<br/>shell / branch / compacted /<br/>idle / error"]
+        Hooks["event subscriptions (10+)<br/>execution.started / tool.input /<br/>tool.success / tool.failed /<br/>filesystem.changed / permission /<br/>shell / branch / compaction /<br/>execution.succeeded / failed"]
         TurnAccum[("turnAccum<br/>per-session memory<br/>xp · tools · failures ·<br/>streak · toolCounts")]
         SlashCmds["slash commands<br/>feed / play / rest /<br/>status / rename / switch"]
 
@@ -255,28 +247,30 @@ flowchart LR
 
 ### Boot flow
 
-1. opencode reads `~/.config/opencode/tui.json` and discovers the buddy entry under `plugin`.
-2. The TUI runtime loads `tui-plugin.jsx` from `opencode-buddy` (via `exports["./tui"]` in `package.json`).
-3. The `tui(api)` function runs once. It sets up:
+1. opencode reads `~/.config/opencode/opencode.json` and discovers the buddy entry under `plugins`.
+2. The plugin runtime loads the server part (`.` → `src/server-plugin.js`) and the TUI part (`./tui` → `src/tui-plugin.jsx`) from the same package entry.
+3. The TUI part's `setup(context)` runs once. It sets up:
    - A **plugin-level frame signal** + `setInterval` (300 ms) that ticks it. The View is passed the signal as a prop, so slot re-renders cannot freeze the animation.
-   - The `sidebar_content` slot. The slot renderer is cached per `sessionID` so the View instance is reused across re-renders and survives session switching.
-   - 7 **slash commands** on the keymap (including `/buddy-list`).
-   - 10+ **event hooks** on the session bus (prompted, tool.called/success/failed, todo, file.edited, permission.replied, shell.ended, vcs.branch.updated, session.compacted, session.idle, session.error). Each hook resolves the target `sessionID` from the event payload (or `lastActiveSessionID` for events that don't carry one) and mutates that session's file in `sessions/`, updating the in-memory `turnAccum` along the way.
+   - The `sidebar.content` slot.
+   - 7 **slash commands** on the keymap layer (including `/buddy-list`).
+   - 10+ **event subscriptions** on the OpenCode event stream (`session.execution.started`, `session.tool.input.started`, `session.tool.success/failed`, `filesystem.changed`, `permission.replied`, `session.shell.ended`, `vcs.branch.updated`, `session.compaction.ended`, `session.execution.succeeded/failed`). Each handler resolves the target `sessionID` from the event (or `lastActiveSessionID` for events that don't carry one) and mutates that session's file in `sessions/`, updating the in-memory `turnAccum` along the way.
    - A 60-second **idle-recovery timer** that iterates all sessions in `sessions/` and grants `+5 energy` to any whose `lastPromptAt` is older than 5 min.
    - A daily **LRU sweep** that deletes session files whose `idleAt` is older than 14 days.
-4. The TUI's `<Slot name="sidebar_content" />` resolves to the buddy's cached `View` (keyed by `session_id`). The View reads the frame signal and re-renders the buddy art on every tick.
-5. The View also runs a 1500 ms timer that polls its **own session's** file mtime. When the file changes (slash command or event hook wrote to it), the View reloads and re-renders.
+4. The TUI's sidebar slot resolves to the buddy's `View`. The View reads the frame signal and re-renders the buddy art on every tick.
+5. The View also runs a 1500 ms timer that polls its **own session's** file mtime. When the file changes (slash command or event handler wrote to it), the View reloads and re-renders.
 6. The animation timer advances unconditionally; per-session `sleeping` buddies just render the same static frame on every tick (cheap; the `renderFrame` is pure).
-7. On `session.idle`, the event hook settles the turn atomically for that session: load → apply `onTurnDone(state, accumXp, stats)` → save. If a level-up happened, a `Level up!` toast surfaces; otherwise `Turn complete +N xp from M tool calls`.
+7. On `session.execution.succeeded`, the event handler settles the turn atomically for that session: load → apply `onTurnDone(state, accumXp, stats)` → save. If a level-up happened, a `Level up!` toast surfaces; otherwise `Turn complete +N xp from M tool calls`.
 
-### Why two config files with the same spec?
+### How one entry loads both parts
 
-opencode has separate plugin registries for the **server** (LLM tools, file watching) and the **TUI** (sidebar slots, slash commands, keybindings). When the same package spec appears in both, opencode looks at the package's `exports` field to pick the right entrypoint:
+A V2 plugin package exports its parts from one `package.json`; the `plugins` entry loads all of them:
 
-- `opencode.json` → `kind: "server"` → loads `src/server-plugin.js` via `main` (no-op since 0.3.x)
-- `tui.json` → `kind: "tui"` → loads `src/tui-plugin.jsx` via `exports["./tui"]`
+- `.` → `src/server-plugin.js` (server part: the `buddy` LLM tool)
+- `./tui` → `src/tui-plugin.jsx` (TUI part: sidebar slot, slash commands, keymap)
 
-Slash commands and event hooks update state instantly without round-tripping through the LLM, which is the right UX for both "I want to feed my pet right now" interactions and "the LLM just finished a turn, react now" reactions.
+The TUI loads the TUI part of every plugin its server loads, so there is no second config file to keep in sync.
+
+Slash commands and event subscriptions update state instantly without round-tripping through the LLM, which is the right UX for both "I want to feed my pet right now" interactions and "the LLM just finished a turn, react now" reactions.
 
 ## Project layout
 
@@ -286,11 +280,11 @@ opencode-buddy/
 ├── README.md
 ├── LICENSE
 ├── scripts/
-│   └── postinstall.mjs     # auto-registers plugin in opencode.json + tui.json
+│   └── postinstall.mjs     # auto-registers plugin in opencode.json (V2 `plugins`)
 └── src/
-    ├── tui-plugin.jsx     # TUI plugin: per-session slot + 7 slash commands + 10+ event hooks
+    ├── tui-plugin.jsx     # TUI part: per-session slot + 7 slash commands + 10+ event subscriptions
     │                      #   + idle-recovery timer + daily LRU sweep
-    ├── server-plugin.js   # Server plugin: LLM tool (accepts session arg) + action=list
+    ├── server-plugin.js   # Server part: LLM tool (accepts session arg) + action=list
     ├── species.js         # ASCII art + per-species palettes + 3-frame idle loop
     ├── state.js           # state machine: tick (night/sleep aware), feed, play, rest,
     │                      #   plus event-driven mutators (onPromptStart, onToolSuccess,
@@ -308,7 +302,7 @@ State lives at `~/.config/opencode-buddy/sessions/<sessionID>.json` (one file pe
 npm uninstall -g opencode-buddy
 ```
 
-Then remove `"opencode-buddy"` from `opencode.json` and from `tui.json` (the npm uninstall does not auto-edit user config).
+Then remove `"opencode-buddy"` from the `plugins` array in `opencode.json` (the npm uninstall does not auto-edit user config).
 
 ## License
 

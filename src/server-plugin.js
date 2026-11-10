@@ -1,12 +1,12 @@
-// v1 server plugin. Provides the `buddy` tool the LLM can call.
-// Loaded by opencode via package.json `main` (server-kind entrypoint).
+// V2 server plugin. Registers the `buddy` tool the LLM can call.
+// Loaded by opencode via package.json `main` (server part).
 // All actions operate on a per-session buddy state. If no `session`
 // argument is provided, falls back to a synthetic "__default__" buddy.
 
-import { tool } from "@opencode-ai/plugin";
+import { Plugin } from "@opencode/plugin";
 import * as state from "./state.js";
 import * as persistence from "./persistence.js";
-import { SPECIES, renderFrame, maxFrameHeight } from "./species.js";
+import { SPECIES, renderFrame } from "./species.js";
 
 const SPECIES_LIST = SPECIES.join(", ");
 
@@ -43,38 +43,44 @@ async function loadOrInit(sessionID) {
   return fresh;
 }
 
-async function BuddyPlugin() {
-  return {
-    tool: {
-      buddy: tool({
+export default Plugin.define({
+  id: "opencode-buddy",
+  async setup(ctx) {
+    await ctx.tool.transform((tools) => {
+      tools.add({
+        name: "buddy",
         description: DESCRIPTION,
-        args: {
-          action: tool.schema
-            .string()
-            .describe(
-              `One of: status, feed, play, rest, switch, rename, hatch, ascii, list, help. For switch/rename/hatch, also pass the "species" or "name" argument. For per-session targeting, pass "session" with the opencode sessionID.`,
-            ),
-          species: tool.schema
-            .string()
-            .optional()
-            .describe(`Species for switch/hatch: ${SPECIES_LIST}`),
-          name: tool.schema
-            .string()
-            .optional()
-            .describe(`Name for rename/hatch (max 20 chars).`),
-          frame: tool.schema
-            .number()
-            .int()
-            .min(0)
-            .max(10)
-            .optional()
-            .describe(`Frame index for ascii action.`),
-          session: tool.schema
-            .string()
-            .optional()
-            .describe(`Opencode sessionID to target. Default: "__default__".`),
+        input: {
+          type: "object",
+          properties: {
+            action: {
+              type: "string",
+              description:
+                `One of: status, feed, play, rest, switch, rename, hatch, ascii, list, help. For switch/rename/hatch, also pass the "species" or "name" argument. For per-session targeting, pass "session" with the opencode sessionID.`,
+            },
+            species: {
+              type: "string",
+              description: `Species for switch/hatch: ${SPECIES_LIST}`,
+            },
+            name: {
+              type: "string",
+              description: `Name for rename/hatch (max 20 chars).`,
+            },
+            frame: {
+              type: "integer",
+              minimum: 0,
+              maximum: 10,
+              description: `Frame index for ascii action.`,
+            },
+            session: {
+              type: "string",
+              description: `Opencode sessionID to target. Default: "__default__".`,
+            },
+          },
+          additionalProperties: false,
         },
         async execute(args) {
+          const out = (text) => ({ content: text });
           const action = (args.action || "").toLowerCase();
           const species = (args.species || "").toLowerCase();
           const name = args.name;
@@ -83,15 +89,17 @@ async function BuddyPlugin() {
 
           if (action === "list") {
             const sessions = await persistence.listSessions();
-            if (sessions.length === 0) return "No session buddies yet.";
-            return sessions
-              .map((b) => {
-                const short = b.sessionID === "__default__"
-                  ? "default"
-                  : b.sessionID.replace(/^ses_/, "").slice(0, 6) + "…"
-                return `· ${b.name} the ${b.species} Lv${b.level} (${short})`
-              })
-              .join("\n");
+            if (sessions.length === 0) return out("No session buddies yet.");
+            return out(
+              sessions
+                .map((b) => {
+                  const short = b.sessionID === "__default__"
+                    ? "default"
+                    : b.sessionID.replace(/^ses_/, "").slice(0, 6) + "…"
+                  return `· ${b.name} the ${b.species} Lv${b.level} (${short})`
+                })
+                .join("\n"),
+            );
           }
 
           let s = await loadOrInit(sid);
@@ -99,61 +107,56 @@ async function BuddyPlugin() {
           switch (action) {
             case "":
             case "status":
-              return summary(s);
+              return out(summary(s));
             case "feed":
               s = state.feed(s);
               await persistence.save(sid, s);
-              return `${s.name} munches happily. ${summary(s)}`;
+              return out(`${s.name} munches happily. ${summary(s)}`);
             case "play":
               s = state.play(s);
               await persistence.save(sid, s);
-              return `${s.name} plays! ${summary(s)}`;
+              return out(`${s.name} plays! ${summary(s)}`);
             case "rest":
               s = state.rest(s);
               await persistence.save(sid, s);
-              return `${s.name} curls up. ${summary(s)}`;
+              return out(`${s.name} curls up. ${summary(s)}`);
             case "switch": {
-              if (!species) return `Pick a species: ${SPECIES_LIST}`;
+              if (!species) return out(`Pick a species: ${SPECIES_LIST}`);
               if (!SPECIES.includes(species))
-                return `Unknown species "${species}". Valid: ${SPECIES_LIST}`;
+                return out(`Unknown species "${species}". Valid: ${SPECIES_LIST}`);
               s = state.switchSpecies(s, species);
               await persistence.save(sid, s);
-              return `${s.name} transformed into a ${species}. ${summary(s)}`;
+              return out(`${s.name} transformed into a ${species}. ${summary(s)}`);
             }
             case "rename": {
-              if (!name) return `Provide a name with the "name" argument.`;
+              if (!name) return out(`Provide a name with the "name" argument.`);
               s = state.rename(s, name);
               await persistence.save(sid, s);
-              return `Renamed to ${s.name}. ${summary(s)}`;
+              return out(`Renamed to ${s.name}. ${summary(s)}`);
             }
             case "hatch": {
               const sp = species && SPECIES.includes(species) ? species : "duck";
               s = state.hatch({ species: sp, name: name || "Buddy" });
               await persistence.save(sid, s);
-              return `Hatched a new ${sp} named ${s.name}. ${summary(s)}`;
+              return out(`Hatched a new ${sp} named ${s.name}. ${summary(s)}`);
             }
             case "ascii": {
               const lines = renderFrame(s.species, s.state, frame);
-              return [
+              return out([
                 "```",
                 ...lines,
                 "```",
                 `${s.name} the ${s.species} · ${s.state}`,
                 `hunger ${Math.floor(s.hunger)}  happy ${Math.floor(s.happiness)}  energy ${Math.floor(s.energy)}  xp ${s.xp}/${s.level * 50}`,
-              ].join("\n");
+              ].join("\n"));
             }
             case "help":
-              return DESCRIPTION;
+              return out(DESCRIPTION);
             default:
-              return `Unknown action "${args.action}". Try: action=help`;
+              return out(`Unknown action "${args.action}". Try: action=help`);
           }
         },
-      }),
-    },
-  };
-}
-
-export default {
-  id: "opencode-buddy",
-  server: BuddyPlugin,
-};
+      });
+    });
+  },
+});
