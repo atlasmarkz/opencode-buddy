@@ -4,25 +4,12 @@ import { Plugin } from "@opencode/plugin/tui"
 import * as persistence from "./persistence.js"
 import {
   tick as tickState,
-  scared as scaredState,
   deriveState,
   feed,
   play,
   rest,
   rename,
   switchSpecies,
-  onPromptStart,
-  onToolSuccess,
-  onToolFailure,
-  onTurnDone,
-  onFileEdited,
-  onPermissionAllowed,
-  onShellSuccess,
-  onBranchUpdated,
-  onCompacted,
-  onIdleRecovery,
-  onStreak,
-  toolXp,
 } from "./state.js"
 import { renderFrame, frameCount, frameIntervalMs, SPECIES } from "./species.js"
 
@@ -75,6 +62,14 @@ function View(props) {
         if (onDisk) {
           const ticked = tickState(onDisk)
           const derived = deriveState(ticked)
+          const prevLevel = state()?.level
+          if (prevLevel != null && derived.level > prevLevel) {
+            props.notify?.({
+              variant: "success",
+              title: "Level up!",
+              message: `${derived.name} reached Lv${derived.level}.`,
+            })
+          }
           setState(derived)
           setTick(tick() + 1)
           persistence.save(sessionID, derived).catch(() => {})
@@ -147,7 +142,7 @@ export default Plugin.define({
     context.ui.slot({
       append: "sidebar.content",
       render: ({ sessionID }) => (
-        <View theme={context.theme} session_id={sessionID} frame={getFrame} />
+        <View theme={context.theme} session_id={sessionID} frame={getFrame} notify={(o) => context.ui.toast.show(o)} />
       ),
     })
 
@@ -332,206 +327,6 @@ export default Plugin.define({
       ],
     }))
 
-    // ---------- Work-driven progression (per session) ----------
-
-    const TURN_XP_CAP = 30
-    const FILE_EDIT_THROTTLE_MS = 30_000
-    const SCARED_FAILURE_THRESHOLD = 2
-    const STREAK_THRESHOLD = 3
-    const SAME_TOOL_HALVE_AFTER = 5
-    const IDLE_RECOVERY_MS = 5 * 60_000
-    const IDLE_RECOVERY_CHECK_MS = 60_000
-    const IDLE_DELETE_MS = 14 * 24 * 60 * 60_000 // 14 days idle → delete
-    const ARCHIVE_CHECK_MS = 24 * 60 * 60_000 // check once per day
-
-    // File-edited is global (no sessionID in the event). Apply to the
-    // most recently active session. Global throttle prevents spam.
-    let lastFileEditedAt = 0
-    let lastActiveSessionID = FALLBACK_SESSION
-    const rememberActive = (sid) => {
-      const n = norm(sid)
-      if (n) lastActiveSessionID = n
-    }
-
-    // sessionID -> { xp, tools, failures, streak, toolCounts, __lastToolWeight }
-    const turnAccum = new Map()
-
-    const getAccum = (sessionID) => {
-      const key = norm(sessionID)
-      let a = turnAccum.get(key)
-      if (!a) {
-        a = { xp: 0, tools: 0, failures: 0, streak: 0, toolCounts: {} }
-        turnAccum.set(key, a)
-      }
-      return a
-    }
-    const resetAccum = (sessionID) => turnAccum.delete(norm(sessionID))
-
-    const unsubscribers = []
-    const on = (type, handler) => unsubscribers.push(context.data.on(type, handler))
-
-    // User submitted a prompt → buddy starts working.
-    on("session.execution.started", async (ev) => {
-      const sid = ev?.data?.sessionID
-      rememberActive(sid)
-      getAccum(sid)
-      await mutate(sid, (s) => onPromptStart(s))
-    })
-
-    on("session.tool.input.started", (ev) => {
-      const sid = ev?.data?.sessionID
-      rememberActive(sid)
-      const name = ev?.data?.name
-      const a = getAccum(sid)
-      const key = (name || "_").toLowerCase()
-      a.toolCounts[key] = (a.toolCounts[key] ?? 0) + 1
-      let weight = toolXp(name)
-      if (a.toolCounts[key] > SAME_TOOL_HALVE_AFTER) {
-        weight = Math.max(1, Math.floor(weight / 2))
-      }
-      a.__lastToolWeight = weight
-    })
-
-    on("session.tool.success", async (ev) => {
-      const sid = ev?.data?.sessionID
-      rememberActive(sid)
-      const a = getAccum(sid)
-      const weight = a.__lastToolWeight ?? 2
-      a.xp = Math.min(TURN_XP_CAP, a.xp + weight)
-      a.tools += 1
-      a.streak += 1
-      a.__lastToolWeight = undefined
-      await mutate(sid, (s) => onToolSuccess(s))
-      if (a.streak > 0 && a.streak % STREAK_THRESHOLD === 0) {
-        await mutate(sid, (s) => onStreak(s))
-      }
-    })
-
-    on("session.tool.failed", async (ev) => {
-      const sid = ev?.data?.sessionID
-      rememberActive(sid)
-      const a = getAccum(sid)
-      a.failures += 1
-      a.streak = 0
-      await mutate(sid, (s) => {
-        const dipped = onToolFailure(s)
-        return a.failures >= SCARED_FAILURE_THRESHOLD ? scaredState(dipped) : dipped
-      })
-    })
-
-    // No sessionID in filesystem.changed; route to last active session.
-    on("filesystem.changed", async () => {
-      const now = Date.now()
-      if (now - lastFileEditedAt < FILE_EDIT_THROTTLE_MS) return
-      lastFileEditedAt = now
-      await mutate(lastActiveSessionID, (s) => onFileEdited(s))
-    })
-
-    on("session.execution.succeeded", async (ev) => {
-      const sid = ev?.data?.sessionID
-      rememberActive(sid)
-      const a = getAccum(sid)
-      const earned = a.xp
-      const stats = { tools: a.tools, failures: a.failures }
-      resetAccum(sid)
-      try {
-        const before = await persistence.load(norm(sid))
-        if (!before) return
-        const after = onTurnDone(before, earned, stats)
-        await persistence.save(norm(sid), after)
-        if (after.level > before.level) {
-          toast({
-            variant: "success",
-            title: "Level up!",
-            message: `${after.name} reached Lv${after.level} (+${10 + earned} xp).`,
-          })
-        } else if (earned > 0 || stats.tools > 0) {
-          toast({
-            variant: "info",
-            title: "Turn complete",
-            message: `${after.name} earned ${10 + earned} xp from ${stats.tools} tool call${stats.tools === 1 ? "" : "s"}.`,
-            duration: 2000,
-          })
-        }
-      } catch (err) {
-        console.error("[buddy] turn settlement error", err)
-      }
-    })
-
-    on("session.execution.failed", async (ev) => {
-      const sid = ev?.data?.sessionID
-      rememberActive(sid)
-      await mutate(sid, (s) => scaredState(s))
-    })
-
-    on("permission.replied", async (ev) => {
-      const sid = ev?.data?.sessionID
-      rememberActive(sid)
-      if (ev?.data?.reply !== "once" && ev?.data?.reply !== "always") return
-      await mutate(sid, (s) => onPermissionAllowed(s))
-    })
-
-    on("session.shell.ended", async (ev) => {
-      const sid = ev?.data?.sessionID
-      rememberActive(sid)
-      await mutate(sid, (s) => onShellSuccess(s))
-    })
-
-    // vcs.branch.updated has no sessionID; route to last active.
-    on("vcs.branch.updated", async () => {
-      await mutate(lastActiveSessionID, (s) => onBranchUpdated(s))
-    })
-
-    on("session.compaction.ended", async (ev) => {
-      const sid = ev?.data?.sessionID
-      rememberActive(sid)
-      await mutate(sid, (s) => onCompacted(s))
-    })
-
-    // Idle-recovery + LRU sweep. Iterates all session files so inactive
-    // sessions also recover (and so the sweep sees them).
-    const idleTimer = setInterval(async () => {
-      try {
-        const sessions = await persistence.listSessions()
-        const now = Date.now()
-        for (const meta of sessions) {
-          const sid = meta.sessionID
-          const s = await persistence.load(sid)
-          if (!s) continue
-          // Don't recover while a session is actively in `working` state.
-          if (s.state === "working") continue
-          const last = s.lastPromptAt ?? s.hatchedAt ?? now
-          if (now - last < IDLE_RECOVERY_MS) continue
-          // Per-session cooldown to avoid stacking recovery every minute.
-          if (now - (s.lastIdleRecoveryAt ?? 0) < IDLE_RECOVERY_MS) continue
-          await mutate(sid, (cur) => {
-            const next = onIdleRecovery(cur)
-            return { ...next, lastIdleRecoveryAt: now }
-          })
-        }
-      } catch (err) {
-        console.error("[buddy] idle recovery error", err)
-      }
-    }, IDLE_RECOVERY_CHECK_MS)
-
-    // LRU sweep: delete session files that haven't been touched in
-    // IDLE_DELETE_MS. Runs once at boot, then once a day.
-    const runSweep = async () => {
-      try {
-        const n = await persistence.sweep(IDLE_DELETE_MS)
-        if (n > 0) console.log(`[buddy] swept ${n} idle session file${n === 1 ? "" : "s"}`)
-      } catch (err) {
-        console.error("[buddy] sweep error", err)
-      }
-    }
-    void runSweep()
-    const sweepTimer = setInterval(runSweep, ARCHIVE_CHECK_MS)
-
-    return () => {
-      clearInterval(frameTimer)
-      clearInterval(idleTimer)
-      clearInterval(sweepTimer)
-      for (const off of unsubscribers) off()
-    }
+    return () => clearInterval(frameTimer)
   },
 })

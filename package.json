@@ -1,18 +1,20 @@
 {
   "name": "@mark_future_ai/opencode-buddy",
-  "version": "1.0.0",
-  "description": "A virtual ASCII pet companion that lives in the opencode TUI sidebar. Hatches, feeds, plays, and reacts to what you're coding.",
+  "version": "1.1.0",
+  "description": "A virtual pet companion for opencode: an ASCII buddy in the TUI sidebar and a floating SVG pet in OpenCode Desktop. Hatches, feeds, plays, and reacts to what you're coding.",
   "type": "module",
   "main": "src/server-plugin.js",
   "exports": {
     ".": "./src/server-plugin.js",
     "./tui": "./src/tui-plugin.jsx",
+    "./gui-experimental": "./dist/gui-experimental.cjs",
     "./package.json": "./package.json"
   },
   "files": [
     "src",
     "scripts",
     "assets",
+    "dist",
     "README.md",
     "LICENSE"
   ],
@@ -23,6 +25,8 @@
     "pet",
     "tamagotchi",
     "ascii",
+    "desktop-pet",
+    "floating-pet",
     "companion",
     "buddy",
     "virtual-pet",
@@ -32,6 +36,8 @@
     "node": ">=18"
   },
   "scripts": {
+    "build:gui": "vite build",
+    "prepack": "npm run build:gui",
     "postinstall": "node scripts/postinstall.mjs"
   },
   "author": "AMark-CS",
@@ -55,5 +61,9 @@
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public"
+  },
+  "devDependencies": {
+    "vite": "^7.3.8",
+    "vite-plugin-solid": "^2.11.15"
   }
 }

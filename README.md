@@ -1,6 +1,6 @@
 # opencode-buddy
 
-A virtual ASCII pet companion that lives in the opencode TUI sidebar. **One buddy per opencode session** — switch sessions and you meet a different buddy; reopen the same session later and yours is exactly as you left it. Hatches, grows, and **earns xp from your actual coding** — every tool call, every completed turn, every approved permission feeds the buddy.
+A virtual pet companion for opencode. In the TUI it lives in the sidebar as ASCII art; in OpenCode Desktop it floats over the window as an SVG pet you can drag, feed, and play with. **One buddy per opencode session** — switch sessions and you meet a different buddy; reopen the same session later and yours is exactly as you left it. Hatches, grows, and **earns xp from your actual coding** — every tool call, every completed turn, every approved permission feeds the buddy.
 
 ![Demo — the buddy in the opencode TUI sidebar (toast notification on the left, buddy panel on the right with hunger / happy / energy bars and a transitioning state)](assets/buddy-demo.gif)
 
@@ -40,7 +40,7 @@ npm install -g @mark_future_ai/opencode-buddy
 
 The `postinstall` script automatically registers the plugin in your global config:
 
-- `opencode.json` → [`plugins`](https://opencode.ai/docs/config) entry; OpenCode loads both the server part (`.` → `src/server-plugin.js`) and the TUI part (`./tui` → `src/tui-plugin.jsx`) from it.
+- `opencode.json` → [`plugins`](https://opencode.ai/docs/config) entry; OpenCode loads the server part (`.` → `src/server-plugin.js`), the TUI part (`./tui` → `src/tui-plugin.jsx`), and the Desktop part (`./gui-experimental` → `dist/gui-experimental.cjs`) from it.
 
 The `postinstall` is JSONC-safe — it leaves any file that contains comments alone and asks you to add the entry manually:
 
@@ -51,11 +51,22 @@ The `postinstall` is JSONC-safe — it leaves any file that contains comments al
 }
 ```
 
-Restart opencode. The buddy appears in the sidebar.
+Restart opencode. The buddy appears in the TUI sidebar and, in OpenCode Desktop, floats over the window.
 
 > Upgrading from 0.6.x? opencode-buddy 1.0 moves to the OpenCode 2 plugin API and no longer runs on OpenCode 1. Remove the old `plugin` entry from `opencode.json` and the `plugin` entry from `tui.json`; `npm install -g @mark_future_ai/opencode-buddy` adds the V2 `plugins` entry for you.
 
 ## Usage
+
+### Desktop floating pet
+
+In OpenCode Desktop the buddy floats over the window:
+
+- **Drag** anywhere; the position is remembered.
+- **Click** for the stats card (food / happy / energy / xp).
+- **Right-click** to feed, play, rest, rename, or switch pets.
+- **Built-in** lists the six SVG presets. **Pets** lists custom packs installed on disk.
+
+The TUI sidebar keeps working at the same time. Custom packs are Desktop-only; the TUI keeps rendering the built-in ASCII species.
 
 ### Slash commands
 
@@ -141,6 +152,29 @@ idle  Lv1  xp5/50              <- state label + level + xp progress (xp needed =
 ```
 
 The bottom state label reflects the persisted `state` field in the session's file. It changes on session events (`celebrating` / `scared` / `working`) and on energy/hunger thresholds (auto `sleeping` or `scared`). The art's idle state has 3 frames; the sidebar re-renders the current frame each time the plugin-level frame signal advances.
+
+## Custom pets (Desktop)
+
+The six species below are the built-in presets. The Desktop pet also loads community packs in the [Codex pet format](https://github.com/backnotprop/codex-pets-react), so pets you already use in Codex work without conversion:
+
+- `~/.codex/pets/<id>/pet.json` + `spritesheet.webp` — auto-detected, read-only.
+- `~/.config/opencode-buddy/pets/<id>/pet.json` + spritesheet — OpenCode-local.
+
+`pet.json`:
+
+```json
+{
+  "id": "my-pet",
+  "displayName": "My Pet",
+  "description": "A tiny friend.",
+  "spriteVersionNumber": 2,
+  "spritesheetPath": "spritesheet.webp"
+}
+```
+
+The spritesheet is an 8×9 atlas of 192×208 px cells (1536×1872 px total). Rows, top to bottom: `idle`, `running-right`, `running-left`, `waving`, `jumping`, `failed`, `waiting`, `running`, `review`. WebP, PNG, and GIF are accepted, up to 5 MB.
+
+Right-click the pet → **Pets** → choose a pack. **Built-in** switches back to a preset. The buddy's hunger, happiness, energy, and xp stay per-session; the pack only changes the Desktop appearance.
 
 ## Six species
 

@@ -12,9 +12,11 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-const DIR = path.join(os.homedir(), ".config", "opencode-buddy");
-const SESSIONS_DIR = path.join(DIR, "sessions");
-const LEGACY_FILE = path.join(DIR, "state.json");
+// Computed lazily so importing this module in a browser-side bundle does not
+// touch Node APIs until a persistence function actually runs in main.
+const dir = () => path.join(os.homedir(), ".config", "opencode-buddy");
+const sessionsDir = () => path.join(dir(), "sessions");
+const legacyFile = () => path.join(dir(), "state.json");
 
 // "__default__" is the synthetic sessionID used by the LLM tool and
 // other contexts where no real opencode session is available.
@@ -25,20 +27,20 @@ async function ensureMigrated() {
   // v0.5, and we want the legacy file to migrate on its next
   // appearance. The check is one fs.access per call, which is cheap.
   try {
-    await fs.mkdir(SESSIONS_DIR, { recursive: true });
-    await fs.access(LEGACY_FILE);
+    await fs.mkdir(sessionsDir(), { recursive: true });
+    await fs.access(legacyFile());
   } catch {
     return; // no legacy file
   }
   // Move legacy file into sessions/__default__.json (idempotent).
-  const dest = path.join(SESSIONS_DIR, `${DEFAULT_KEY}.json`);
+  const dest = path.join(sessionsDir(), `${DEFAULT_KEY}.json`);
   try {
     await fs.access(dest);
     // dest already exists — discard legacy to keep deterministic state.
-    await fs.unlink(LEGACY_FILE);
+    await fs.unlink(legacyFile());
   } catch {
     try {
-      await fs.rename(LEGACY_FILE, dest);
+      await fs.rename(legacyFile(), dest);
     } catch {
       // best-effort; nothing fatal
     }
@@ -58,7 +60,7 @@ function keyFor(sessionID) {
 }
 
 function pathFor(sessionID) {
-  return path.join(SESSIONS_DIR, `${keyFor(sessionID)}.json`);
+  return path.join(sessionsDir(), `${keyFor(sessionID)}.json`);
 }
 
 export async function load(sessionID) {
@@ -82,7 +84,7 @@ export async function load(sessionID) {
 export async function save(sessionID, state) {
   await ensureMigrated();
   const fp = pathFor(sessionID);
-  await fs.mkdir(SESSIONS_DIR, { recursive: true });
+  await fs.mkdir(sessionsDir(), { recursive: true });
   // Bump idleAt on every write so the LRU sweeper can tell which
   // session files are still in active use. lastTick may be back-dated
   // by the tick() function for time-skip simulations; idleAt is the
@@ -113,14 +115,14 @@ export async function sweep(maxAgeMs) {
   let removed = 0;
   let entries;
   try {
-    entries = await fs.readdir(SESSIONS_DIR);
+    entries = await fs.readdir(sessionsDir());
   } catch {
     return 0;
   }
   const now = Date.now();
   for (const name of entries) {
     if (!name.endsWith(".json")) continue;
-    const fp = path.join(SESSIONS_DIR, name);
+    const fp = path.join(sessionsDir(), name);
     try {
       const raw = await fs.readFile(fp, "utf8");
       const data = JSON.parse(raw);
@@ -139,7 +141,7 @@ export async function listSessions() {
   await ensureMigrated();
   let entries;
   try {
-    entries = await fs.readdir(SESSIONS_DIR);
+    entries = await fs.readdir(sessionsDir());
   } catch {
     return [];
   }
@@ -147,7 +149,7 @@ export async function listSessions() {
   for (const name of entries) {
     if (!name.endsWith(".json")) continue;
     try {
-      const raw = await fs.readFile(path.join(SESSIONS_DIR, name), "utf8");
+      const raw = await fs.readFile(path.join(sessionsDir(), name), "utf8");
       const data = JSON.parse(raw);
       out.push({
         sessionID: name.replace(/\.json$/, ""),
