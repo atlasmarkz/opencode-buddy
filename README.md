@@ -1,10 +1,10 @@
 # opencode-buddy
 
-A virtual pet for opencode. It lives in the TUI sidebar as ASCII art and floats over OpenCode Desktop as a draggable SVG pet. One buddy per session; it earns XP from your actual work.
+Six tiny companions for OpenCode Desktop. They float over your session, react to what the agent is doing, and grow from real work.
 
-| TUI | Desktop |
-| --- | --- |
-| ![Buddy in the opencode TUI sidebar](assets/buddy-demo.gif) | ![Buddy floating over OpenCode Desktop](assets/buddy-desktop.png) |
+![Six built-in pets](assets/buddy-pets.png)
+
+![Buddy overlay with stats and actions](assets/buddy-desktop.png)
 
 ## Install
 
@@ -14,7 +14,7 @@ Requires OpenCode 2.2.6+.
 npm install -g @mark_future_ai/opencode-buddy
 ```
 
-The postinstall registers the plugin in `~/.config/opencode/opencode.json`. If that file contains comments, add the entry yourself:
+The postinstall adds the plugin to `~/.config/opencode/opencode.json`. If that file contains comments, add it yourself:
 
 ```jsonc
 {
@@ -22,41 +22,23 @@ The postinstall registers the plugin in `~/.config/opencode/opencode.json`. If t
 }
 ```
 
-Reload opencode.
+Reload OpenCode Desktop.
 
-## Usage
+## Use
 
-### Desktop
-
-- Drag to move; the position is remembered.
-- Click for stats; right-click to feed, play, rest, rename, or switch pets.
+- Drag the pet anywhere; the position is remembered.
+- Click for stats; right-click to feed, play, rest, rename, or switch.
 - Hide from the right-click menu. Bring it back with `Cmd+K` / `Ctrl+K` → **Toggle floating pet**.
-- **Built-in** lists the six presets; **Pets** lists custom packs.
+- **Built-in** has the six presets; **Pets** has custom packs.
 
-### TUI
+Presets: **Quack** (duck), **Miso** (cat), **Ember** (dragon), **Lumi** (axolotl), **Bolt** (robot), **Boo** (ghost).
 
-| Command | Effect |
-| --- | --- |
-| `/buddy` | Show the current buddy's stats |
-| `/buddy-feed` | Feed (+25 hunger, -5 energy) |
-| `/buddy-play` | Play (+15 happy, +1 xp) |
-| `/buddy-rest` | Rest (+30 energy) |
-| `/buddy-list` | List session buddies |
-| `/buddy-rename` | Rename the buddy |
-| `/buddy-switch` | Switch species |
+## Custom pets
 
-## Built-in pets
+Drop a Codex-format pack in `~/.codex/pets/<id>/` or `~/.config/opencode-buddy/pets/<id>/`:
 
-Quack (duck), Miso (cat), Ember (dragon), Lumi (axolotl), Bolt (robot), Boo (ghost).
-
-## Custom pets (Desktop)
-
-The Desktop pet loads community packs in the Codex pet format. Drop a pack in either place:
-
-- `~/.codex/pets/<id>/` — auto-detected, read-only
-- `~/.config/opencode-buddy/pets/<id>/` — OpenCode-local
-
-A pack is `pet.json` plus a spritesheet: 8×9 atlas, 192×208 px cells, WebP/PNG/GIF, up to 5 MB.
+- `pet.json`
+- `spritesheet.webp` — 8×9 atlas, 192×208 px cells, up to 5 MB
 
 ```json
 {
@@ -67,7 +49,7 @@ A pack is `pet.json` plus a spritesheet: 8×9 atlas, 192×208 px cells, WebP/PNG
 }
 ```
 
-Custom packs are Desktop-only; the TUI keeps the built-in ASCII pets.
+Then right-click the pet → **Pets**.
 
 ## Uninstall
 
