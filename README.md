@@ -1,6 +1,6 @@
 # opencode-buddy
 
-Six tiny companions for OpenCode Desktop. They float over your session, react to what the agent is doing, and grow from real work.
+Six tiny pixel companions for OpenCode Desktop. They float over your session, react to what the agent is doing, and grow from real work. Built-in pets are 48×48 pixel art; Codex pet packs work too.
 
 ![Six built-in pets](assets/buddy-pets.png)
 

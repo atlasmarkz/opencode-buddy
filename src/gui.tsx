@@ -105,371 +105,411 @@ function savePos(pos: { x: number; y: number }) {
   }
 }
 
-function Face(props: {
-  x: number
-  y: number
-  scale?: number
-  dark?: string
-  cheek?: string
-  mouth?: boolean
-  cheeks?: boolean
-}) {
-  const dark = props.dark ?? "#3a2b2b"
-  const cheek = props.cheek ?? "#ff9fb2"
-  return (
-    <g
-      class="buddy-face"
-      transform={`translate(${props.x} ${props.y}) scale(${props.scale ?? 1})`}
-    >
-      <g class="buddy-eyes-open">
-        <ellipse cx="-9" cy="0" rx="4.6" ry="5.5" fill={dark} />
-        <ellipse cx="9" cy="0" rx="4.6" ry="5.5" fill={dark} />
-        <circle cx="-10.7" cy="-2.1" r="1.8" fill="#fff" opacity=".95" />
-        <circle cx="7.3" cy="-2.1" r="1.8" fill="#fff" opacity=".95" />
-        <circle cx="-7.3" cy="2.4" r=".9" fill="#fff" opacity=".65" />
-        <circle cx="10.7" cy="2.4" r=".9" fill="#fff" opacity=".65" />
-      </g>
-      <g
-        class="buddy-eyes-happy"
-        fill="none"
-        stroke={dark}
-        stroke-width="2.4"
-        stroke-linecap="round"
-      >
-        <path d="M-13 2 q4 -6 8 0" />
-        <path d="M5 2 q4 -6 8 0" />
-      </g>
-      <g
-        class="buddy-eyes-sleep"
-        fill="none"
-        stroke={dark}
-        stroke-width="2.2"
-        stroke-linecap="round"
-      >
-        <path d="M-13 0 q4 4 8 0" />
-        <path d="M5 0 q4 4 8 0" />
-      </g>
-      <g class="buddy-eyes-wide">
-        <ellipse cx="-9" cy="0" rx="5.4" ry="6.4" fill="#fff" />
-        <ellipse cx="9" cy="0" rx="5.4" ry="6.4" fill="#fff" />
-        <circle cx="-9" cy="1" r="2.6" fill={dark} />
-        <circle cx="9" cy="1" r="2.6" fill={dark} />
-        <circle cx="-10.2" cy="-.6" r="1" fill="#fff" />
-        <circle cx="7.8" cy="-.6" r="1" fill="#fff" />
-      </g>
-      <Show when={props.mouth !== false}>
-        <path
-          class="buddy-mouth-smile"
-          d="M-4 9 q4 4 8 0"
-          fill="none"
-          stroke={dark}
-          stroke-width="2"
-          stroke-linecap="round"
-        />
-        <path class="buddy-mouth-open" d="M-4 8 q4 7 8 0 q-4 2 -8 0" fill={dark} />
-        <path
-          class="buddy-mouth-sleep"
-          d="M-2 9 q2 -2 4 0"
-          fill="none"
-          stroke={dark}
-          stroke-width="1.8"
-          stroke-linecap="round"
-        />
-        <path
-          class="buddy-mouth-wavy"
-          d="M-5 9 q2 -3 4 0 q2 3 4 0"
-          fill="none"
-          stroke={dark}
-          stroke-width="1.9"
-          stroke-linecap="round"
-        />
-      </Show>
-      <Show when={props.cheeks !== false}>
-        <ellipse class="buddy-blush" cx="-16" cy="8" rx="5" ry="3" fill={cheek} />
-        <ellipse class="buddy-blush" cx="16" cy="8" rx="5" ry="3" fill={cheek} />
-      </Show>
-    </g>
-  )
+type Pixel = string | null
+type PixelDot = { x: number; y: number; c: string }
+
+type PixelPalette = {
+  outline: string
+  dark: string
+  base: string
+  light: string
+  accent: string
+  cheek: string
+  white: string
+  black: string
+}
+
+const PIXEL_PALETTES: Record<string, PixelPalette> = {
+  duck: {
+    outline: "#3D2B0F", dark: "#E0A800", base: "#FFD84D", light: "#FFF3B0",
+    accent: "#FF9F1C", cheek: "#FF9FB2", white: "#FFFFFF", black: "#2B2118",
+  },
+  cat: {
+    outline: "#3A2416", dark: "#D97A3A", base: "#F6A96B", light: "#FFE8D6",
+    accent: "#FF8FA3", cheek: "#FF9FB2", white: "#FFFFFF", black: "#2B2118",
+  },
+  dragon: {
+    outline: "#1F3A22", dark: "#3F9E52", base: "#7BD389", light: "#D9FFE0",
+    accent: "#F2D388", cheek: "#FFB3C7", white: "#FFFFFF", black: "#1F2A18",
+  },
+  axolotl: {
+    outline: "#4A2333", dark: "#FF7A9E", base: "#FFB3C7", light: "#FFE3EC",
+    accent: "#FF7A9E", cheek: "#FF7FA3", white: "#FFFFFF", black: "#3A2430",
+  },
+  robot: {
+    outline: "#1B2430", dark: "#8496AA", base: "#D5DFEA", light: "#F4F8FC",
+    accent: "#7EF7C7", cheek: "#6EE7F9", white: "#FFFFFF", black: "#1B2430",
+  },
+  ghost: {
+    outline: "#3D3654", dark: "#C9C4F5", base: "#E8E4FF", light: "#FFFFFF",
+    accent: "#C9C4F5", cheek: "#FFA3C0", white: "#FFFFFF", black: "#3D3654",
+  },
+}
+
+const PIXEL_N = 48
+const PIXEL_SCALE = 1.5
+
+function pixelGrid(): Pixel[][] {
+  return Array.from({ length: PIXEL_N }, () => Array<Pixel>(PIXEL_N).fill(null))
+}
+
+function pxRaw(g: Pixel[][], x: number, y: number, c: Pixel) {
+  if (x >= 0 && x < PIXEL_N && y >= 0 && y < PIXEL_N) g[y][x] = c
+}
+
+function px(g: Pixel[][], bx: number, by: number, c: Pixel) {
+  pxRaw(g, Math.round(bx * PIXEL_SCALE), Math.round(by * PIXEL_SCALE), c)
+}
+
+function fillRect(g: Pixel[][], x: number, y: number, w: number, h: number, c: Pixel) {
+  const x0 = Math.round(x * PIXEL_SCALE)
+  const y0 = Math.round(y * PIXEL_SCALE)
+  const x1 = Math.round((x + w) * PIXEL_SCALE)
+  const y1 = Math.round((y + h) * PIXEL_SCALE)
+  for (let yy = y0; yy < y1; yy++)
+    for (let xx = x0; xx < x1; xx++) pxRaw(g, xx, yy, c)
+}
+
+function fillEllipse(
+  g: Pixel[][], cx: number, cy: number, rx: number, ry: number, c: Pixel,
+) {
+  for (let y = 0; y < PIXEL_N; y++)
+    for (let x = 0; x < PIXEL_N; x++) {
+      const bx = (x + 0.5) / PIXEL_SCALE
+      const by = (y + 0.5) / PIXEL_SCALE
+      const dx = (bx - cx) / rx
+      const dy = (by - cy) / ry
+      if (dx * dx + dy * dy <= 1) pxRaw(g, x, y, c)
+    }
+}
+
+function fillTriangle(
+  g: Pixel[][], x1: number, y1: number, x2: number, y2: number,
+  x3: number, y3: number, c: Pixel,
+) {
+  const minX = Math.floor(Math.min(x1, x2, x3) * PIXEL_SCALE)
+  const maxX = Math.ceil(Math.max(x1, x2, x3) * PIXEL_SCALE)
+  const minY = Math.floor(Math.min(y1, y2, y3) * PIXEL_SCALE)
+  const maxY = Math.ceil(Math.max(y1, y2, y3) * PIXEL_SCALE)
+  const sign = (ax: number, ay: number, bx: number, by: number, x: number, y: number) =>
+    (x - ax) * (by - ay) - (bx - ax) * (y - ay)
+  for (let y = minY; y <= maxY; y++)
+    for (let x = minX; x <= maxX; x++) {
+      const bx = (x + 0.5) / PIXEL_SCALE
+      const by = (y + 0.5) / PIXEL_SCALE
+      const d1 = sign(x1, y1, x2, y2, bx, by)
+      const d2 = sign(x2, y2, x3, y3, bx, by)
+      const d3 = sign(x3, y3, x1, y1, bx, by)
+      const hasNeg = d1 < 0 || d2 < 0 || d3 < 0
+      const hasPos = d1 > 0 || d2 > 0 || d3 > 0
+      if (!(hasNeg && hasPos)) pxRaw(g, x, y, c)
+    }
+}
+
+function pixelLine(
+  g: Pixel[][], x0: number, y0: number, x1: number, y1: number,
+  c: Pixel, thick = 1,
+) {
+  let x = Math.round(x0 * PIXEL_SCALE)
+  let y = Math.round(y0 * PIXEL_SCALE)
+  const tx = Math.round(x1 * PIXEL_SCALE)
+  const ty = Math.round(y1 * PIXEL_SCALE)
+  const t = Math.max(1, Math.round(thick * PIXEL_SCALE))
+  const dx = Math.abs(tx - x)
+  const sx = x < tx ? 1 : -1
+  const dy = -Math.abs(ty - y)
+  const sy = y < ty ? 1 : -1
+  let err = dx + dy
+  for (;;) {
+    for (let oy = 0; oy < t; oy++)
+      for (let ox = 0; ox < t; ox++) pxRaw(g, x + ox, y + oy, c)
+    if (x === tx && y === ty) break
+    const e2 = 2 * err
+    if (e2 >= dy) { err += dy; x += sx }
+    if (e2 <= dx) { err += dx; y += sy }
+  }
+}
+
+function pixelOutline(g: Pixel[][], color: string) {
+  const seen = Array.from({ length: PIXEL_N }, () => Array<boolean>(PIXEL_N).fill(false))
+  let best: Array<[number, number]> = []
+
+  for (let y = 0; y < PIXEL_N; y++)
+    for (let x = 0; x < PIXEL_N; x++) {
+      if (g[y][x] === null || seen[y][x]) continue
+      const stack: Array<[number, number]> = [[x, y]]
+      const comp: Array<[number, number]> = []
+      seen[y][x] = true
+      while (stack.length) {
+        const [cx, cy] = stack.pop()!
+        comp.push([cx, cy])
+        for (const [nx, ny] of [[cx - 1, cy], [cx + 1, cy], [cx, cy - 1], [cx, cy + 1]]) {
+          if (nx < 0 || nx >= PIXEL_N || ny < 0 || ny >= PIXEL_N) continue
+          if (seen[ny][nx] || g[ny][nx] === null) continue
+          seen[ny][nx] = true
+          stack.push([nx, ny])
+        }
+      }
+      if (comp.length > best.length) best = comp
+    }
+
+  const copy = g.map((row) => row.slice())
+  for (const [x, y] of best) {
+    for (const [nx, ny] of [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]]) {
+      if (nx < 0 || nx >= PIXEL_N || ny < 0 || ny >= PIXEL_N) continue
+      if (copy[ny][nx] === null) g[ny][nx] = color
+    }
+  }
+}
+
+function pixelTone(
+  g: Pixel[][], c: string,
+  test: (x: number, y: number) => boolean,
+) {
+  for (let y = 0; y < PIXEL_N; y++)
+    for (let x = 0; x < PIXEL_N; x++) {
+      if (g[y][x] !== null && test((x + 0.5) / PIXEL_SCALE, (y + 0.5) / PIXEL_SCALE))
+        g[y][x] = c
+    }
+}
+
+function pixelFace(
+  g: Pixel[][], p: PixelPalette, state: string, mouth = true,
+) {
+  const eyes = (color: string) => {
+    if (state === "celebrating") {
+      px(g, 11, 12, color); px(g, 12, 11, color); px(g, 13, 12, color)
+      px(g, 18, 12, color); px(g, 19, 11, color); px(g, 20, 12, color)
+    } else if (state === "sleeping") {
+      fillRect(g, 11, 12, 3, 1, color)
+      fillRect(g, 18, 12, 3, 1, color)
+    } else if (state === "scared") {
+      fillRect(g, 10, 10, 4, 4, p.white)
+      fillRect(g, 18, 10, 4, 4, p.white)
+      fillRect(g, 11, 11, 2, 3, color)
+      fillRect(g, 19, 11, 2, 3, color)
+    } else {
+      fillRect(g, 11, 11, 2, 3, color)
+      fillRect(g, 19, 11, 2, 3, color)
+      px(g, 11, 11, p.white)
+      px(g, 19, 11, p.white)
+    }
+  }
+  eyes(p.black)
+
+  if (mouth) {
+    if (state === "celebrating") {
+      fillRect(g, 14, 16, 4, 2, p.black)
+      fillRect(g, 15, 17, 2, 1, p.accent)
+    } else if (state === "sleeping") {
+      fillRect(g, 15, 17, 2, 1, p.black)
+    } else if (state === "scared") {
+      px(g, 14, 16, p.black); px(g, 15, 17, p.black)
+      px(g, 16, 16, p.black); px(g, 17, 17, p.black)
+    } else {
+      px(g, 15, 16, p.black); px(g, 16, 17, p.black); px(g, 17, 16, p.black)
+    }
+  }
+
+  fillRect(g, 8, 15, 2, 1, p.cheek)
+  fillRect(g, 22, 15, 2, 1, p.cheek)
+}
+
+function robotFace(g: Pixel[][], p: PixelPalette, state: string) {
+  if (state === "celebrating") {
+    px(g, 12, 12, p.accent); px(g, 13, 11, p.accent); px(g, 14, 12, p.accent)
+    px(g, 17, 12, p.accent); px(g, 18, 11, p.accent); px(g, 19, 12, p.accent)
+    fillRect(g, 14, 14, 4, 2, p.accent)
+  } else if (state === "sleeping") {
+    fillRect(g, 12, 12, 3, 1, p.accent)
+    fillRect(g, 17, 12, 3, 1, p.accent)
+    fillRect(g, 15, 14, 2, 1, p.accent)
+  } else if (state === "scared") {
+    fillRect(g, 11, 10, 4, 4, p.white)
+    fillRect(g, 17, 10, 4, 4, p.white)
+    fillRect(g, 12, 11, 2, 3, p.black)
+    fillRect(g, 18, 11, 2, 3, p.black)
+    px(g, 14, 15, p.accent); px(g, 15, 14, p.accent)
+    px(g, 16, 15, p.accent); px(g, 17, 14, p.accent)
+  } else {
+    fillRect(g, 12, 10, 3, 4, p.accent)
+    fillRect(g, 17, 10, 3, 4, p.accent)
+    fillRect(g, 14, 15, 4, 1, p.accent)
+  }
+}
+
+function buildPet(species: string, state: string): PixelDot[] {
+  const p = PIXEL_PALETTES[species] ?? PIXEL_PALETTES.duck
+  const g = pixelGrid()
+
+  if (species === "duck") {
+    fillEllipse(g, 16, 20, 9, 8, p.base)
+    fillEllipse(g, 16, 12, 9, 8, p.base)
+    px(g, 24, 20, p.base); px(g, 25, 19, p.base); px(g, 26, 19, p.base); px(g, 27, 18, p.base)
+    fillEllipse(g, 8, 20, 2, 4, p.dark)
+    fillEllipse(g, 24, 20, 2, 4, p.dark)
+    fillRect(g, 11, 28, 3, 2, p.accent)
+    fillRect(g, 18, 28, 3, 2, p.accent)
+    fillTriangle(g, 14, 5, 16, 1, 19, 5, p.base)
+    pixelTone(g, p.dark, (_x, y) => y >= 22)
+    pixelTone(g, p.light, (x, y) => x >= 10 && x <= 11 && y >= 6 && y <= 6)
+    fillEllipse(g, 16, 22, 5, 4, p.light)
+    fillRect(g, 13, 15, 6, 2, p.accent)
+    fillRect(g, 14, 17, 4, 1, p.accent)
+    pixelOutline(g, p.outline)
+    pixelFace(g, p, state, false)
+  } else if (species === "cat") {
+    pixelLine(g, 24, 23, 28, 20, p.base, 2)
+    pixelLine(g, 28, 20, 29, 16, p.base, 2)
+    pixelLine(g, 29, 16, 27, 14, p.light, 2)
+    fillTriangle(g, 7, 10, 9, 3, 13, 10, p.base)
+    fillTriangle(g, 9, 9, 10, 5, 12, 9, p.accent)
+    fillTriangle(g, 25, 10, 23, 3, 19, 10, p.base)
+    fillTriangle(g, 23, 9, 22, 5, 20, 9, p.accent)
+    fillEllipse(g, 16, 21, 8, 7, p.base)
+    fillEllipse(g, 16, 12, 9, 8, p.base)
+    fillRect(g, 10, 27, 4, 2, p.light)
+    fillRect(g, 18, 27, 4, 2, p.light)
+    fillEllipse(g, 16, 15, 4, 3, p.light)
+    px(g, 13, 7, p.dark); px(g, 14, 8, p.dark)
+    px(g, 16, 7, p.dark); px(g, 18, 7, p.dark); px(g, 19, 8, p.dark)
+    pixelTone(g, p.dark, (_x, y) => y >= 22)
+    pixelTone(g, p.light, (x, y) => x >= 10 && x <= 11 && y >= 6 && y <= 6)
+    pixelOutline(g, p.outline)
+    fillRect(g, 15, 14, 2, 1, p.accent)
+    px(g, 15, 16, p.black); px(g, 16, 17, p.black); px(g, 17, 16, p.black)
+    pixelFace(g, p, state, false)
+    pixelLine(g, 9, 15, 4, 14, p.dark)
+    pixelLine(g, 9, 16, 4, 17, p.dark)
+    pixelLine(g, 23, 15, 28, 14, p.dark)
+    pixelLine(g, 23, 16, 28, 17, p.dark)
+  } else if (species === "dragon") {
+    pixelLine(g, 23, 24, 28, 21, p.base, 3)
+    pixelLine(g, 28, 21, 29, 18, p.base, 2)
+    fillTriangle(g, 29, 18, 31, 16, 29, 15, p.dark)
+    fillTriangle(g, 4, 17, 10, 18, 6, 23, p.dark)
+    fillTriangle(g, 28, 17, 22, 18, 26, 23, p.dark)
+    fillEllipse(g, 16, 21, 8, 7, p.base)
+    fillEllipse(g, 16, 12, 9, 8, p.base)
+    fillEllipse(g, 16, 23, 5, 4, p.light)
+    fillTriangle(g, 12, 4, 16, 1, 20, 4, p.light)
+    fillRect(g, 13, 15, 6, 2, p.light)
+    px(g, 14, 15, p.dark); px(g, 18, 15, p.dark)
+    fillRect(g, 11, 28, 3, 2, p.dark)
+    fillRect(g, 18, 28, 3, 2, p.dark)
+    pixelTone(g, p.dark, (_x, y) => y >= 22)
+    pixelTone(g, p.light, (x, y) => x >= 10 && x <= 11 && y >= 6 && y <= 6)
+    pixelOutline(g, p.outline)
+    pixelFace(g, p, state, true)
+    px(g, 14, 17, p.white); px(g, 18, 17, p.white)
+  } else if (species === "axolotl") {
+    pixelLine(g, 8, 10, 3, 6, p.accent, 2)
+    pixelLine(g, 7, 13, 2, 12, p.accent, 2)
+    pixelLine(g, 8, 16, 3, 19, p.accent, 2)
+    pixelLine(g, 24, 10, 29, 6, p.accent, 2)
+    pixelLine(g, 25, 13, 30, 12, p.accent, 2)
+    pixelLine(g, 24, 16, 29, 19, p.accent, 2)
+    pixelLine(g, 24, 23, 28, 22, p.base, 2)
+    pixelLine(g, 28, 22, 30, 19, p.light, 2)
+    fillEllipse(g, 16, 21, 7, 7, p.base)
+    fillEllipse(g, 16, 12, 9, 8, p.base)
+    px(g, 12, 4, p.accent); px(g, 13, 3, p.accent); px(g, 14, 4, p.accent)
+    px(g, 15, 3, p.accent); px(g, 16, 2, p.accent); px(g, 17, 3, p.accent)
+    px(g, 18, 4, p.accent); px(g, 19, 3, p.accent)
+    fillEllipse(g, 16, 23, 4, 3, p.light)
+    px(g, 8, 22, p.base); px(g, 24, 22, p.base)
+    pixelTone(g, p.dark, (_x, y) => y >= 22)
+    pixelTone(g, p.light, (x, y) => x >= 10 && x <= 11 && y >= 6 && y <= 6)
+    pixelOutline(g, p.outline)
+    pixelFace(g, p, state, true)
+  } else if (species === "robot") {
+    pixelLine(g, 16, 6, 16, 3, p.dark, 1)
+    fillRect(g, 15, 2, 3, 2, p.accent)
+    fillRect(g, 6, 10, 2, 5, p.dark)
+    fillRect(g, 24, 10, 2, 5, p.dark)
+    fillRect(g, 8, 6, 16, 12, p.base)
+    fillRect(g, 10, 8, 12, 8, p.black)
+    fillRect(g, 11, 18, 10, 8, p.base)
+    fillRect(g, 14, 20, 4, 3, p.black)
+    fillRect(g, 15, 21, 2, 1, p.accent)
+    fillRect(g, 8, 18, 2, 7, p.dark)
+    fillRect(g, 22, 18, 2, 7, p.dark)
+    fillRect(g, 12, 26, 3, 2, p.dark)
+    fillRect(g, 17, 26, 3, 2, p.dark)
+    pixelTone(g, p.dark, (_x, y) => y >= 23)
+    pixelTone(g, p.light, (x, y) => x >= 10 && x <= 11 && y >= 7 && y <= 7)
+    pixelOutline(g, p.outline)
+    robotFace(g, p, state)
+  } else {
+    fillRect(g, 8, 7, 16, 14, p.base)
+    fillEllipse(g, 16, 7, 8, 4, p.base)
+    fillEllipse(g, 6, 18, 2, 3, p.base)
+    fillEllipse(g, 26, 18, 2, 3, p.base)
+    fillTriangle(g, 8, 21, 10, 24, 12, 21, p.base)
+    fillTriangle(g, 12, 21, 14, 24, 16, 21, p.base)
+    fillTriangle(g, 16, 21, 18, 24, 20, 21, p.base)
+    fillTriangle(g, 20, 21, 22, 24, 24, 21, p.base)
+    pixelTone(g, p.dark, (_x, y) => y >= 19)
+    pixelTone(g, p.light, (x, y) => x >= 10 && x <= 11 && y >= 7 && y <= 7)
+    pixelOutline(g, p.outline)
+    pixelFace(g, p, state, true)
+  }
+
+  const pixels: PixelDot[] = []
+  for (let y = 0; y < PIXEL_N; y++)
+    for (let x = 0; x < PIXEL_N; x++) {
+      const c = g[y][x]
+      if (c) pixels.push({ x, y, c })
+    }
+  return pixels
 }
 
 function PetArt(props: { species: string; state: string }) {
+  const pixels = () => buildPet(props.species, props.state)
   return (
     <svg
-      class={`buddy-pet species-${props.species} is-${props.state}`}
-      viewBox="0 0 120 120"
+      class={`buddy-pet pixel-art species-${props.species} is-${props.state}`}
+      viewBox="0 0 48 48"
+      shape-rendering="crispEdges"
       role="img"
       aria-label={`${props.species} buddy, ${props.state}`}
     >
-      <defs>
-        <filter id="buddy-soft" x="-60%" y="-60%" width="220%" height="220%">
-          <feGaussianBlur stdDeviation="7" />
-        </filter>
-        <filter id="buddy-shadow-blur" x="-60%" y="-60%" width="220%" height="220%">
-          <feGaussianBlur stdDeviation="1.4" />
-        </filter>
-        <radialGradient id="duck-head" cx="36%" cy="26%" r="80%">
-          <stop offset="0" stop-color="#fffbe0" />
-          <stop offset="55%" stop-color="#ffe066" />
-          <stop offset="100%" stop-color="#f7c948" />
-        </radialGradient>
-        <linearGradient id="duck-body" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#ffe066" />
-          <stop offset="100%" stop-color="#f5b800" />
-        </linearGradient>
-        <linearGradient id="duck-beak" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#ffc14d" />
-          <stop offset="100%" stop-color="#f59f00" />
-        </linearGradient>
-        <radialGradient id="cat-head" cx="36%" cy="26%" r="80%">
-          <stop offset="0" stop-color="#fff3e3" />
-          <stop offset="58%" stop-color="#ffd0a6" />
-          <stop offset="100%" stop-color="#f6a96b" />
-        </radialGradient>
-        <linearGradient id="cat-body" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#ffd0a6" />
-          <stop offset="100%" stop-color="#e8904f" />
-        </linearGradient>
-        <radialGradient id="dragon-head" cx="36%" cy="26%" r="80%">
-          <stop offset="0" stop-color="#e5ffe9" />
-          <stop offset="55%" stop-color="#8ee59a" />
-          <stop offset="100%" stop-color="#5fbe6c" />
-        </radialGradient>
-        <linearGradient id="dragon-body" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#8ee59a" />
-          <stop offset="100%" stop-color="#4fae5b" />
-        </linearGradient>
-        <radialGradient id="axo-head" cx="36%" cy="26%" r="80%">
-          <stop offset="0" stop-color="#fff4f7" />
-          <stop offset="55%" stop-color="#ffc9d8" />
-          <stop offset="100%" stop-color="#ffa8c0" />
-        </radialGradient>
-        <linearGradient id="axo-body" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#ffc9d8" />
-          <stop offset="100%" stop-color="#ff9fb8" />
-        </linearGradient>
-        <linearGradient id="robot-head" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#eef3f8" />
-          <stop offset="100%" stop-color="#9aa7b8" />
-        </linearGradient>
-        <linearGradient id="robot-body" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#d7dee7" />
-          <stop offset="100%" stop-color="#7b8794" />
-        </linearGradient>
-        <linearGradient id="ghost-body" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#f3f1ff" />
-          <stop offset="100%" stop-color="#c9c4f5" />
-        </linearGradient>
-      </defs>
-
-      <ellipse class="buddy-aura" cx="60" cy="68" rx="42" ry="38" filter="url(#buddy-soft)" />
-      <ellipse
-        class="buddy-shadow"
-        cx="60"
-        cy="111"
-        rx="26"
-        ry="4.5"
-        filter="url(#buddy-shadow-blur)"
-      />
-
-      <Switch>
-        <Match when={props.species === "duck"}>
-          <g class="buddy-body">
-            <ellipse cx="60" cy="86" rx="25" ry="20" fill="url(#duck-body)" />
-            <ellipse cx="60" cy="48" rx="26" ry="25" fill="url(#duck-head)" />
-            <ellipse cx="48" cy="34" rx="10" ry="6" fill="#fff" opacity=".26" transform="rotate(-24 48 34)" />
-            <path d="M45 29 q-5 -13 7 -15 q-1 9 3 12" fill="#f7b731" />
-            <path d="M53 26 q1 -10 9 -9 q-3 7 0 10" fill="#ffd43b" />
-            <ellipse class="buddy-wing" cx="35" cy="86" rx="9" ry="13" fill="#f5b800" transform="rotate(18 35 86)" />
-            <ellipse class="buddy-wing" cx="85" cy="86" rx="9" ry="13" fill="#f5b800" transform="rotate(-18 85 86)" />
-            <ellipse cx="60" cy="89" rx="14" ry="12" fill="#fff6cc" opacity=".6" />
-            <path d="M51 57 q9 -5 18 0 q-3 9 -9 9 q-6 0 -9 -9" fill="url(#duck-beak)" />
-            <path d="M54 58 q6 -2 12 0" stroke="#e8890c" stroke-width="1.4" fill="none" stroke-linecap="round" />
-            <path d="M48 104 l-4 7 M48 104 l0 8 M48 104 l4 7" stroke="#f59f00" stroke-width="3" stroke-linecap="round" />
-            <path d="M72 104 l-4 7 M72 104 l0 8 M72 104 l4 7" stroke="#f59f00" stroke-width="3" stroke-linecap="round" />
-            <Face x="60" y="46" dark="#4a3418" cheek="#ff9fb2" mouth={false} />
-          </g>
-        </Match>
-
-        <Match when={props.species === "cat"}>
-          <g class="buddy-body">
-            <path
-              class="buddy-tail"
-              d="M83 93 q22 -2 18 -23 q-2 -8 -10 -6"
-              fill="none"
-              stroke="url(#cat-body)"
-              stroke-width="9"
-              stroke-linecap="round"
-            />
-            <path d="M91 64 q5 2 6 6" stroke="#fff1e0" stroke-width="5" stroke-linecap="round" />
-            <path d="M38 35 L31 12 L53 27 Z" fill="url(#cat-head)" />
-            <path d="M41 31 L37 19 L49 27 Z" fill="#ffb3c7" />
-            <path d="M82 35 L89 12 L67 27 Z" fill="url(#cat-head)" />
-            <path d="M79 31 L83 19 L71 27 Z" fill="#ffb3c7" />
-            <ellipse cx="60" cy="86" rx="24" ry="20" fill="url(#cat-body)" />
-            <ellipse cx="60" cy="90" rx="14" ry="12" fill="#fff1e0" opacity=".75" />
-            <circle cx="60" cy="48" r="26" fill="url(#cat-head)" />
-            <ellipse cx="48" cy="34" rx="9" ry="5" fill="#fff" opacity=".3" transform="rotate(-24 48 34)" />
-            <path d="M52 24 q2 6 0 9 M60 23 q0 7 0 10 M68 24 q-2 6 0 9" stroke="#d97a3a" stroke-width="2" stroke-linecap="round" opacity=".55" />
-            <ellipse cx="60" cy="61" rx="12" ry="8" fill="#fff8ef" opacity=".92" />
-            <path d="M57 57 h6 l-3 4 z" fill="#ff8fa3" />
-            <path d="M60 61 v3 M57 63 q3 3 6 0" fill="none" stroke="#c97b4a" stroke-width="1.7" stroke-linecap="round" />
-            <path d="M44 58 l-12 -2 M44 62 l-12 2 M76 58 l12 -2 M76 62 l12 2" stroke="#c97b4a" stroke-width="1.2" stroke-linecap="round" opacity=".65" />
-            <ellipse cx="47" cy="104" rx="8" ry="5" fill="#fff1e0" />
-            <ellipse cx="73" cy="104" rx="8" ry="5" fill="#fff1e0" />
-            <Face x="60" y="46" dark="#3a2b2b" cheek="#ff9fb2" mouth={false} />
-          </g>
-        </Match>
-
-        <Match when={props.species === "dragon"}>
-          <g class="buddy-body">
-            <path
-              class="buddy-tail"
-              d="M83 94 q21 4 18 -15 q-1 -7 -8 -7"
-              fill="none"
-              stroke="#4fae5b"
-              stroke-width="8"
-              stroke-linecap="round"
-            />
-            <path d="M96 72 l9 -6 l-9 -4 z" fill="#4fae5b" />
-            <path d="M39 78 q-21 -18 -28 -2 q11 2 15 12 q6 -1 13 -10" fill="#3f9e52" opacity=".92" />
-            <path d="M81 78 q21 -18 28 -2 q-11 2 -15 12 q-6 -1 -13 -10" fill="#3f9e52" opacity=".92" />
-            <ellipse cx="60" cy="86" rx="24" ry="20" fill="url(#dragon-body)" />
-            <ellipse cx="60" cy="90" rx="13" ry="12" fill="#fff3c4" opacity=".85" />
-            <circle cx="60" cy="48" r="26" fill="url(#dragon-head)" />
-            <ellipse cx="48" cy="34" rx="9" ry="5" fill="#fff" opacity=".28" transform="rotate(-24 48 34)" />
-            <path d="M45 29 q-4 -13 6 -16 q-1 10 3 14" fill="#f2d388" />
-            <path d="M75 29 q4 -13 -6 -16 q1 10 -3 14" fill="#f2d388" />
-            <path d="M57 23 l3 -9 l3 9" fill="#a8f0b0" />
-            <ellipse cx="60" cy="61" rx="9" ry="6" fill="#d8ffdd" opacity=".65" />
-            <circle cx="55" cy="55" r="1" fill="#3f9e52" />
-            <circle cx="65" cy="55" r="1" fill="#3f9e52" />
-            <path d="M55 62 q5 4 10 0" fill="none" stroke="#2f3a20" stroke-width="1.8" stroke-linecap="round" />
-            <path d="M53 61 l2 4 l2 -4 M63 61 l2 4 l2 -4" fill="#fff" />
-            <ellipse cx="48" cy="104" rx="8" ry="5" fill="#4fae5b" />
-            <ellipse cx="72" cy="104" rx="8" ry="5" fill="#4fae5b" />
-            <Face x="60" y="46" dark="#2f3a20" cheek="#ff9fb2" mouth={false} />
-          </g>
-        </Match>
-
-        <Match when={props.species === "axolotl"}>
-          <g class="buddy-body">
-            <path
-              class="buddy-tail"
-              d="M83 96 q18 6 20 -10 q-2 -8 -10 -8"
-              fill="none"
-              stroke="#ff8fab"
-              stroke-width="9"
-              stroke-linecap="round"
-              opacity=".9"
-            />
-            <path d="M87 98 q12 2 16 -4" stroke="#ffc9d8" stroke-width="4" stroke-linecap="round" />
-            <g stroke="#ff8fab" stroke-width="4.5" stroke-linecap="round" fill="none">
-              <path d="M38 42 q-14 -8 -18 -16" />
-              <path d="M36 51 q-16 -2 -20 -2" />
-              <path d="M38 60 q-14 6 -18 14" />
-              <path d="M82 42 q14 -8 18 -16" />
-              <path d="M84 51 q16 -2 20 -2" />
-              <path d="M82 60 q14 6 18 14" />
-            </g>
-            <g fill="#ff8fab">
-              <circle cx="20" cy="26" r="3" />
-              <circle cx="16" cy="49" r="3" />
-              <circle cx="20" cy="74" r="3" />
-              <circle cx="100" cy="26" r="3" />
-              <circle cx="104" cy="49" r="3" />
-              <circle cx="100" cy="74" r="3" />
-            </g>
-            <ellipse cx="60" cy="86" rx="23" ry="19" fill="url(#axo-body)" />
-            <ellipse cx="60" cy="90" rx="13" ry="12" fill="#fff0f4" opacity=".8" />
-            <circle cx="60" cy="50" r="25" fill="url(#axo-head)" />
-            <ellipse cx="48" cy="37" rx="9" ry="5" fill="#fff" opacity=".3" transform="rotate(-24 48 37)" />
-            <path d="M60 27 q6 -10 12 -3 q-6 1 -8 8" fill="#ff8fab" opacity=".7" />
-            <ellipse cx="38" cy="88" rx="6" ry="9" fill="#ffc9d8" transform="rotate(20 38 88)" />
-            <ellipse cx="82" cy="88" rx="6" ry="9" fill="#ffc9d8" transform="rotate(-20 82 88)" />
-            <Face x="60" y="50" dark="#5b3a4a" cheek="#ff7fa3" />
-          </g>
-        </Match>
-
-        <Match when={props.species === "robot"}>
-          <g class="buddy-body">
-            <path d="M60 26 v-9" stroke="#8b98a8" stroke-width="3" stroke-linecap="round" />
-            <circle class="buddy-antenna" cx="60" cy="13" r="5" fill="#6ee7f9" />
-            <rect x="34" y="26" width="52" height="45" rx="14" fill="url(#robot-head)" />
-            <rect x="41" y="34" width="38" height="30" rx="9" fill="#1b2430" />
-            <g class="buddy-robot-face">
-              <g class="buddy-robot-eyes-open">
-                <rect x="47" y="43" width="8" height="10" rx="3" fill="#7ef7c7" />
-                <rect x="65" y="43" width="8" height="10" rx="3" fill="#7ef7c7" />
-                <rect x="49" y="45" width="3" height="4" rx="1.5" fill="#eafff8" opacity=".85" />
-                <rect x="67" y="45" width="3" height="4" rx="1.5" fill="#eafff8" opacity=".85" />
-              </g>
-              <g class="buddy-robot-eyes-happy" fill="none" stroke="#7ef7c7" stroke-width="2.4" stroke-linecap="round">
-                <path d="M47 50 q4 -6 8 0" />
-                <path d="M65 50 q4 -6 8 0" />
-              </g>
-              <g class="buddy-robot-eyes-sleep" fill="none" stroke="#7ef7c7" stroke-width="2.4" stroke-linecap="round">
-                <path d="M47 49 q4 4 8 0" />
-                <path d="M65 49 q4 4 8 0" />
-              </g>
-              <g class="buddy-robot-eyes-wide">
-                <rect x="46" y="42" width="10" height="12" rx="3" fill="#7ef7c7" />
-                <rect x="64" y="42" width="10" height="12" rx="3" fill="#7ef7c7" />
-                <rect x="49" y="46" width="4" height="6" rx="2" fill="#0f172a" />
-                <rect x="67" y="46" width="4" height="6" rx="2" fill="#0f172a" />
-              </g>
-              <path class="buddy-robot-mouth-smile" d="M55 57 q5 4 10 0" fill="none" stroke="#7ef7c7" stroke-width="2" stroke-linecap="round" />
-              <path class="buddy-robot-mouth-open" d="M55 56 q5 7 10 0 q-5 2 -10 0" fill="#7ef7c7" />
-              <path class="buddy-robot-mouth-sleep" d="M57 57 q3 -2 6 0" fill="none" stroke="#7ef7c7" stroke-width="1.8" stroke-linecap="round" />
-              <path class="buddy-robot-mouth-wavy" d="M54 57 q2 -3 4 0 q2 3 4 0" fill="none" stroke="#7ef7c7" stroke-width="1.9" stroke-linecap="round" />
-            </g>
-            <circle cx="32" cy="48" r="5" fill="#8b98a8" />
-            <circle cx="88" cy="48" r="5" fill="#8b98a8" />
-            <rect x="42" y="72" width="36" height="28" rx="10" fill="url(#robot-body)" />
-            <rect x="50" y="80" width="20" height="12" rx="4" fill="#1b2430" />
-            <circle class="buddy-robot-core" cx="60" cy="86" r="3.2" fill="#6ee7f9" />
-            <rect x="30" y="76" width="8" height="18" rx="4" fill="#8b98a8" />
-            <rect x="82" y="76" width="8" height="18" rx="4" fill="#8b98a8" />
-            <rect x="46" y="100" width="12" height="6" rx="3" fill="#7b8794" />
-            <rect x="62" y="100" width="12" height="6" rx="3" fill="#7b8794" />
-          </g>
-        </Match>
-
-        <Match when={props.species === "ghost"}>
-          <g class="buddy-body">
-            <path
-              d="M34 100 v-44 q0 -30 26 -30 q26 0 26 30 v44 l-9 -7 l-8 7 l-9 -7 l-8 7 l-9 -7 z"
-              fill="url(#ghost-body)"
-            />
-            <path d="M44 38 q4 -12 16 -14" stroke="#fff" stroke-width="5" stroke-linecap="round" opacity=".35" fill="none" />
-            <path d="M34 78 q-12 -4 -12 6 q7 -1 11 4" fill="url(#ghost-body)" />
-            <path d="M86 78 q12 -4 12 6 q-7 -1 -11 4" fill="url(#ghost-body)" />
-            <Face x="60" y="52" dark="#4e4868" cheek="#ffa3c0" />
-          </g>
-        </Match>
-      </Switch>
-
-      <g class="buddy-work-prop">
-        <rect x="44" y="94" width="32" height="16" rx="4" fill="#1b2430" stroke="#4b5563" stroke-width="1.5" />
-        <rect x="48" y="97" width="24" height="9" rx="2" fill="#0ea5e9" opacity=".22" />
-        <path d="M52 102 l3 -3 l-3 -3 M56 99 h4" stroke="#7ef7c7" stroke-width="1.4" fill="none" stroke-linecap="round" />
-        <rect x="40" y="109" width="40" height="3" rx="1.5" fill="#374151" />
+      <rect x="15" y="45" width="18" height="1" fill="#000" opacity=".28" />
+      <rect x="16" y="46" width="15" height="1" fill="#000" opacity=".14" />
+      <g class="buddy-body">
+        <For each={pixels()}>
+          {(p) => <rect x={p.x} y={p.y} width="1" height="1" fill={p.c} />}
+        </For>
       </g>
-
+      <g class="buddy-work-prop">
+        <rect x="15" y="36" width="18" height="9" fill="#1B2430" />
+        <rect x="17" y="38" width="14" height="3" fill="#7EF7C7" opacity=".55" />
+        <rect x="12" y="45" width="24" height="2" fill="#374151" />
+      </g>
       <Show when={props.state === "sleeping"}>
         <g class="buddy-zzz">
-          <text x="92" y="34">z</text>
-          <text x="101" y="24">z</text>
+          <rect x="36" y="7" width="4" height="1" fill="#C9C4F5" />
+          <rect x="38" y="9" width="2" height="1" fill="#C9C4F5" />
+          <rect x="36" y="11" width="4" height="1" fill="#C9C4F5" />
+          <rect x="42" y="3" width="3" height="1" fill="#C9C4F5" />
+          <rect x="42" y="6" width="3" height="1" fill="#C9C4F5" />
         </g>
       </Show>
       <Show when={props.state === "celebrating"}>
         <g class="buddy-sparkles">
-          <path d="M100 34 l2 6 l6 2 l-6 2 l-2 6 l-2 -6 l-6 -2 l6 -2 z" />
-          <path d="M20 50 l2 5 l5 2 l-5 2 l-2 5 l-2 -5 l-5 -2 l5 -2 z" />
-          <path d="M96 66 l1.5 4 l4 1.5 l-4 1.5 l-1.5 4 l-1.5 -4 l-4 -1.5 l4 -1.5 z" />
+          <rect x="6" y="7" width="1" height="4" fill="#FDE68A" />
+          <rect x="4" y="9" width="4" height="1" fill="#FDE68A" />
+          <rect x="40" y="13" width="1" height="4" fill="#FDE68A" />
+          <rect x="39" y="15" width="4" height="1" fill="#FDE68A" />
+          <rect x="37" y="34" width="1" height="4" fill="#FDE68A" />
+          <rect x="36" y="36" width="4" height="1" fill="#FDE68A" />
         </g>
       </Show>
       <Show when={props.state === "scared"}>
-        <path class="buddy-sweat" d="M96 44 q6 9 0 13 q-6 -4 0 -13" />
+        <g class="buddy-sweat">
+          <rect x="39" y="15" width="3" height="3" fill="#7DD3FC" />
+          <rect x="39" y="18" width="1" height="2" fill="#7DD3FC" />
+        </g>
       </Show>
     </svg>
   )

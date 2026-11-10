@@ -62,7 +62,7 @@
 }
 
 .buddy-aura {
-  opacity: 0.17;
+  opacity: 0.12;
 }
 
 .species-duck .buddy-aura { fill: #ffd43b; }
@@ -145,6 +145,13 @@
   opacity: 1;
 }
 
+.buddy-tail,
+.buddy-wing,
+.buddy-eyes-open {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
 .buddy-blush {
   opacity: 0.5;
 }
@@ -217,6 +224,12 @@
 .buddy-pet.is-working .buddy-work-prop {
   display: block;
   animation: buddy-prop 1.1s ease-in-out infinite;
+}
+
+.buddy-zzz {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: buddy-float 2.6s ease-in-out infinite;
 }
 
 .buddy-zzz text {
