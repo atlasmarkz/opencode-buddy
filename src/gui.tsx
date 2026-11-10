@@ -45,7 +45,11 @@ type PackInfo = {
 }
 
 type PackPayload = PackInfo & { dataUrl: string }
-type PacksResponse = { packs: PackInfo[]; active: string | null }
+type PacksResponse = {
+  packs: PackInfo[]
+  active: string | null
+  visible: boolean
+}
 
 const CELL_W = 96
 const CELL_H = 104
@@ -73,8 +77,9 @@ const STATE_ANIM: Record<string, keyof typeof CODEX_ATLAS.animations> = {
   sleeping: "waiting",
 }
 
-// Module-level so palette commands can toggle the same stats card.
+// Module-level so palette commands can toggle the same stats card / visibility.
 const [statsPinned, setStatsPinned] = createSignal(false)
+const [petVisible, setPetVisible] = createSignal(true)
 
 const clamp = (value: number, lo: number, hi: number) =>
   Math.max(lo, Math.min(hi, value))
@@ -584,6 +589,7 @@ function PetOverlay(props: { ctx: any }) {
       const res = (await ipc.packs()) as PacksResponse
       setPacks(Array.isArray(res?.packs) ? res.packs : [])
       setActiveId(res?.active ?? null)
+      setPetVisible(res?.visible !== false)
       if (res?.active) {
         try {
           setActivePack((await ipc.pack({ id: res.active })) as PackPayload)
@@ -649,6 +655,16 @@ function PetOverlay(props: { ctx: any }) {
         message: String(err?.message ?? err),
         variant: "error",
       })
+    }
+  }
+
+  const setVisible = async (visible: boolean) => {
+    setMenu(false)
+    setPetVisible(visible)
+    try {
+      await ipc.setVisible({ visible })
+    } catch {
+      // Best-effort persistence; the toggle still works for this window.
     }
   }
 
@@ -750,6 +766,7 @@ function PetOverlay(props: { ctx: any }) {
   }
 
   return (
+    <Show when={petVisible()}>
     <div
       class="buddy-floating"
       classList={{ "is-dragging": drag() }}
@@ -842,6 +859,9 @@ function PetOverlay(props: { ctx: any }) {
           <button type="button" onClick={openRename}>
             <span class="buddy-menu-icon">✏️</span>Rename…
           </button>
+          <button type="button" onClick={() => setVisible(false)}>
+            <span class="buddy-menu-icon">👻</span>Hide pet
+          </button>
         </div>
       </Show>
 
@@ -870,6 +890,7 @@ function PetOverlay(props: { ctx: any }) {
         </Show>
       </div>
     </div>
+    </Show>
   )
 }
 
@@ -906,6 +927,28 @@ export default Plugin.define({
         })
       }
     }
+    ctx.add(Command, () => ({
+      id: "buddy.toggle",
+      title: "Toggle floating pet",
+      keywords: ["buddy", "pet", "floating", "show", "hide"],
+      group: "Buddy",
+      section: "session" as const,
+      run: async () => {
+        const visible = !petVisible()
+        setPetVisible(visible)
+        try {
+          await ctx.main(BuddyIpc).setVisible({ visible })
+        } catch {
+          // The window-level toggle still applies.
+        }
+        ctx.toast.show({
+          title: "Buddy",
+          message: visible
+            ? "Floating pet shown."
+            : "Floating pet hidden. Run this command again to show it.",
+        })
+      },
+    }))
     ctx.add(Command, command("buddy.feed", "Feed buddy", withSession("feed")))
     ctx.add(Command, command("buddy.play", "Play with buddy", withSession("play")))
     ctx.add(Command, command("buddy.rest", "Let buddy rest", withSession("rest")))

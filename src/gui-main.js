@@ -78,7 +78,11 @@ async function list() {
 }
 
 async function packs() {
-  return { packs: await pets.listPacks(), active: await pets.getActive() }
+  return {
+    packs: await pets.listPacks(),
+    active: await pets.getActive(),
+    visible: await pets.getVisible(),
+  }
 }
 
 async function pack(input) {
@@ -89,6 +93,10 @@ async function selectPet(input) {
   return { active: await pets.setActive(input.id) }
 }
 
+async function setVisible(input) {
+  return { visible: await pets.setVisible(input.visible) }
+}
+
 export function setup(ctx) {
   const provider = ctx.provide(BuddyIpc, {
     get,
@@ -97,6 +105,7 @@ export function setup(ctx) {
     packs,
     pack,
     selectPet,
+    setVisible,
   })
   return () => provider.dispose()
 }

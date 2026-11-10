@@ -127,22 +127,44 @@ export async function readPack(id) {
   return payload
 }
 
-export async function getActive() {
+async function readSettings() {
   try {
     const data = JSON.parse(await fs.readFile(settingsFile(), "utf8"))
-    return typeof data.pet === "string" && data.pet ? data.pet : null
+    return {
+      pet: typeof data.pet === "string" && data.pet ? data.pet : null,
+      visible: typeof data.visible === "boolean" ? data.visible : true,
+    }
   } catch {
-    return null
+    return { pet: null, visible: true }
   }
+}
+
+async function writeSettings(next) {
+  await fs.mkdir(configDir(), { recursive: true })
+  const tmp = `${settingsFile()}.tmp`
+  await fs.writeFile(
+    tmp,
+    `${JSON.stringify({ pet: next.pet ?? null, visible: next.visible !== false }, null, 2)}\n`,
+  )
+  await fs.rename(tmp, settingsFile())
+}
+
+export async function getActive() {
+  return (await readSettings()).pet
 }
 
 export async function setActive(id) {
   const pet = typeof id === "string" && id ? id : null
   if (pet) await readPack(pet) // validate before saving
-
-  await fs.mkdir(configDir(), { recursive: true })
-  const tmp = `${settingsFile()}.tmp`
-  await fs.writeFile(tmp, `${JSON.stringify({ pet }, null, 2)}\n`)
-  await fs.rename(tmp, settingsFile())
+  await writeSettings({ ...(await readSettings()), pet })
   return pet
+}
+
+export async function getVisible() {
+  return (await readSettings()).visible
+}
+
+export async function setVisible(visible) {
+  await writeSettings({ ...(await readSettings()), visible: !!visible })
+  return !!visible
 }

@@ -64,6 +64,7 @@ In OpenCode Desktop the buddy floats over the window:
 - **Drag** anywhere; the position is remembered.
 - **Click** for the stats card (food / happy / energy / xp).
 - **Right-click** to feed, play, rest, rename, or switch pets.
+- **Hide** from the right-click menu; bring it back with the command palette (`Cmd+K` / `Ctrl+K`) → **Toggle floating pet**.
 - **Built-in** lists the six SVG presets. **Pets** lists custom packs installed on disk.
 
 The TUI sidebar keeps working at the same time. Custom packs are Desktop-only; the TUI keeps rendering the built-in ASCII species.

@@ -32,5 +32,9 @@ export const BuddyIpc = Ipc.define({
       input: Schema.Struct({ id: Schema.optionalKey(Schema.String) }),
       output: Schema.Unknown,
     },
+    setVisible: {
+      input: Schema.Struct({ visible: Schema.Boolean }),
+      output: Schema.Unknown,
+    },
   },
 })
