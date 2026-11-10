@@ -28,7 +28,7 @@ Reload OpenCode Desktop.
 
 - Drag the pet anywhere; the position is remembered.
 - Click for stats; right-click to feed, play, rest, rename, or switch.
-- Hide from the right-click menu. Bring it back with `Cmd+K` / `Ctrl+K` → **Toggle floating pet**.
+- Hide from the right-click menu. Bring it back with `/buddy-pet` in the composer, or `Cmd+K` / `Ctrl+K` → **Toggle floating pet**.
 - **Built-in** has the six presets; **Pets** has custom packs.
 
 Presets: **Quack** (duck), **Miso** (cat), **Ember** (dragon), **Lumi** (axolotl), **Bolt** (robot), **Boo** (ghost).

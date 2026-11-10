@@ -1,6 +1,6 @@
 {
   "name": "@mark_future_ai/opencode-buddy",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "A virtual pet companion for opencode: an ASCII buddy in the TUI sidebar and a floating SVG pet in OpenCode Desktop. Hatches, feeds, plays, and reacts to what you're coding.",
   "type": "module",
   "main": "src/server-plugin.js",

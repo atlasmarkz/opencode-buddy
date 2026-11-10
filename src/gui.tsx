@@ -973,6 +973,7 @@ export default Plugin.define({
       keywords: ["buddy", "pet", "floating", "show", "hide"],
       group: "Buddy",
       section: "session" as const,
+      slash: { name: "buddy-pet" },
       run: async () => {
         const visible = !petVisible()
         setPetVisible(visible)
@@ -985,7 +986,7 @@ export default Plugin.define({
           title: "Buddy",
           message: visible
             ? "Floating pet shown."
-            : "Floating pet hidden. Run this command again to show it.",
+            : "Floating pet hidden. Type /buddy-pet to bring it back.",
         })
       },
     }))
